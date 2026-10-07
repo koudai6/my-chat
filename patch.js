@@ -1108,3 +1108,75 @@ console.log('✅ patch.js 精简版已加载');
   setTimeout(buildCard, 2500);
   console.log('✅ v26 已加载');
 })();
+// ====== v27：控制中心名字设置（兜底版） ======
+(function(){
+  if (window.__v27) return;
+  window.__v27 = true;
+
+  function getT(){ return localStorage.getItem('mt') || 'ievan'; }
+  function getS(){ return localStorage.getItem('ms') || '在线'; }
+
+  window.__applyMeta = function(){
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: getT(),
+        artist: getS(),
+        album: '聊天保活',
+        artwork: [{src:'icon-192.PNG', sizes:'192x192', type:'image/png'}]
+      });
+      navigator.mediaSession.playbackState = 'playing';
+    } catch(e){}
+  };
+
+  const origStart = window.startKeepAlive;
+  window.startKeepAlive = function(){
+    if (origStart) origStart();
+    setTimeout(window.__applyMeta, 100);
+  };
+
+  function build(){
+    const me = document.getElementById('me');
+    if (!me) return;
+    if (document.getElementById('mediaNameCard')) return;
+    const card = document.createElement('div');
+    card.className = 'section card';
+    card.id = 'mediaNameCard';
+    card.innerHTML =
+      '<div class="row" style="cursor:pointer" onclick="window.__editName()">' +
+      '<div class="icon settingsIcon iconSvg" style="background:#e9e9ec!important;color:#333!important">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:19px;height:19px"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>' +
+      '</div>' +
+      '<div class="rowmain"><div class="title">控制中心名字</div><div class="desc" id="mediaNameDesc">' + getT() + ' · ' + getS() + '</div></div>' +
+      '<span class="chev">›</span></div>';
+    me.appendChild(card);
+  }
+
+  window.__editName = function(){
+    modal('控制中心名字',
+      '<div class="desc" style="margin-bottom:12px;line-height:1.6">显示在控制中心和锁屏的媒体卡片上。</div>' +
+      '<div class="field"><label>标题（大字）</label><input id="mtInput" class="textinput" maxlength="20" value="' + getT() + '"></div>' +
+      '<div class="field"><label>副标题（小字）</label><input id="msInput" class="textinput" maxlength="20" value="' + getS() + '"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="action secondary" style="flex:1;margin:0" onclick="closeModal()">取消</button>' +
+      '<button class="action" style="flex:1;margin:0" onclick="window.__saveName()">保存</button>' +
+      '</div>');
+  };
+
+  window.__saveName = function(){
+    const t = (document.getElementById('mtInput').value || '').trim() || 'ievan';
+    const s = (document.getElementById('msInput').value || '').trim() || '在线';
+    localStorage.setItem('mt', t);
+    localStorage.setItem('ms', s);
+    const d = document.getElementById('mediaNameDesc');
+    if (d) d.textContent = t + ' · ' + s;
+    window.__applyMeta();
+    closeModal();
+    if (typeof showToast === 'function') showToast('已保存');
+  };
+
+  // 每秒检查一次，确保"我的"页面有这张卡
+  setInterval(build, 1000);
+
+  console.log('✅ v27 已加载');
+})();
