@@ -625,3 +625,126 @@ console.log('✅ 性能与回复体验优化补丁已加载');
 
   console.log('✅ v11 卡片 id 绑定修复已加载');
 })();
+// ====== v12：朋友圈互动频率改成分钟单位 ======
+(function() {
+  if (window.__v12Loaded) return;
+  window.__v12Loaded = true;
+
+  // 迁移旧数据：如果 momentPostMax 等值小于 60，说明是旧版（小时），×60 转成分钟
+  function migrate() {
+    const c = state && state.chatSettings;
+    if (!c) return;
+    if (c.momentPostMax !== undefined && c.momentPostMax > 0 && c.momentPostMax < 60) {
+      c.momentPostMax = Math.round(c.momentPostMax * 60);
+      c.momentLikeMax = Math.round((c.momentLikeMax || 1) * 60);
+      c.momentCommentMax = Math.round((c.momentCommentMax || 1) * 60);
+      c.momentReplyMax = Math.round((c.momentReplyMax || 1) * 60);
+      save();
+    }
+  }
+
+  // 重新定义 momentRange：返回分钟数
+  window.momentRange = function(minMinutes, maxMinutes) {
+    const min = Math.max(1, Number(minMinutes) || 1);
+    const max = Math.max(min, Number(maxMinutes) || min);
+    return min + Math.random() * (max - min);
+  };
+
+  // 重新定义各调度器，×60000（分钟 → 毫秒）
+  window.scheduleMomentPost = function(){
+    clearTimeout(momentPostTimer);
+    const cs = state.chatSettings;
+    momentPostTimer = setTimeout(function(){
+      autoFriendMoment();
+      scheduleMomentPost();
+    }, momentRange(cs.momentPostMin, cs.momentPostMax) * 60000);
+  };
+  window.scheduleMomentLike = function(){
+    clearTimeout(momentLikeTimer);
+    const cs = state.chatSettings;
+    momentLikeTimer = setTimeout(function(){
+      autoFriendLike();
+      scheduleMomentLike();
+    }, momentRange(cs.momentLikeMin, cs.momentLikeMax) * 60000);
+  };
+  window.scheduleMomentComment = function(){
+    clearTimeout(momentCommentTimer);
+    const cs = state.chatSettings;
+    momentCommentTimer = setTimeout(function(){
+      autoFriendComment();
+      scheduleMomentComment();
+    }, momentRange(cs.momentCommentMin, cs.momentCommentMax) * 60000);
+  };
+  window.scheduleMomentReply = function(){
+    clearTimeout(momentReplyTimer);
+    const cs = state.chatSettings;
+    momentReplyTimer = setTimeout(function(){
+      autoFriendReply();
+      scheduleMomentReply();
+    }, momentRange(cs.momentReplyMin, cs.momentReplyMax) * 60000);
+  };
+
+  // 重新定义描述
+  window.updateMomentInteractionDesc = function(){
+    const d = document.getElementById('momentInteractionDesc');
+    if (!d) return;
+    const c = state.chatSettings;
+    d.textContent = `发动态 ${c.momentPostMin}–${c.momentPostMax}分钟 · 点赞 ${c.momentLikeMin}–${c.momentLikeMax}分钟 · 评论 ${c.momentCommentMin}–${c.momentCommentMax}分钟 · 回复 ${c.momentReplyMin}–${c.momentReplyMax}分钟`;
+  };
+
+  // 重新定义设置弹窗（全部改成分钟）
+  window.showMomentInteractionSettings = function(){
+    const c = state.chatSettings;
+    modal('朋友圈互动', `
+      <div class="desc" style="margin-bottom:12px;line-height:1.6">好友会随机主动发朋友圈、点赞、评论。每项独立计时，都按分钟设置。</div>
+      <div style="font-weight:600;margin:6px 0">对方发朋友圈</div>
+      <div class="field"><label>最短间隔（分钟）</label><input id="mpMin" class="textinput" type="number" min="1" step="1" value="${c.momentPostMin}"></div>
+      <div class="field"><label>最长间隔（分钟）</label><input id="mpMax" class="textinput" type="number" min="1" step="1" value="${c.momentPostMax}"></div>
+      <div style="font-weight:600;margin:14px 0 6px">对方点赞</div>
+      <div class="field"><label>最短间隔（分钟）</label><input id="mlMin" class="textinput" type="number" min="1" step="1" value="${c.momentLikeMin}"></div>
+      <div class="field"><label>最长间隔（分钟）</label><input id="mlMax" class="textinput" type="number" min="1" step="1" value="${c.momentLikeMax}"></div>
+      <div style="font-weight:600;margin:14px 0 6px">对方评论</div>
+      <div class="field"><label>最短间隔（分钟）</label><input id="mcMin" class="textinput" type="number" min="1" step="1" value="${c.momentCommentMin}"></div>
+      <div class="field"><label>最长间隔（分钟）</label><input id="mcMax" class="textinput" type="number" min="1" step="1" value="${c.momentCommentMax}"></div>
+      <div style="font-weight:600;margin:14px 0 6px">对方回复我的评论</div>
+      <div class="field"><label>最短间隔（分钟）</label><input id="mrMin" class="textinput" type="number" min="1" step="1" value="${c.momentReplyMin}"></div>
+      <div class="field"><label>最长间隔（分钟）</label><input id="mrMax" class="textinput" type="number" min="1" step="1" value="${c.momentReplyMax}"></div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="action secondary" style="flex:1;margin:0" onclick="closeModal()">取消</button>
+        <button class="action" style="flex:1;margin:0" onclick="saveMomentInteractionSettings()">保存</button>
+      </div>
+    `);
+  };
+
+  // 重新定义保存函数
+  window.saveMomentInteractionSettings = function(){
+    const c = state.chatSettings;
+    const v = function(id) {
+      const el = document.getElementById(id);
+      return Math.max(1, Number(el ? el.value : 1) || 1);
+    };
+    let a, b;
+    a = v('mpMin'); b = v('mpMax'); if (b < a) b = a;
+    c.momentPostMin = a; c.momentPostMax = b;
+    a = v('mlMin'); b = v('mlMax'); if (b < a) b = a;
+    c.momentLikeMin = a; c.momentLikeMax = b;
+    a = v('mcMin'); b = v('mcMax'); if (b < a) b = a;
+    c.momentCommentMin = a; c.momentCommentMax = b;
+    a = v('mrMin'); b = v('mrMax'); if (b < a) b = a;
+    c.momentReplyMin = a; c.momentReplyMax = b;
+
+    save();
+    updateMomentInteractionDesc();
+    closeModal();
+    if (typeof startMomentSchedulers === 'function') startMomentSchedulers();
+    showToast('朋友圈互动频率已保存（分钟）');
+  };
+
+  // 等 state 加载完后迁移
+  setTimeout(function(){
+    migrate();
+    if (typeof updateMomentInteractionDesc === 'function') updateMomentInteractionDesc();
+    if (typeof startMomentSchedulers === 'function') startMomentSchedulers();
+    console.log('✅ 朋友圈互动频率已改成分钟单位');
+  }, 2000);
+})();
