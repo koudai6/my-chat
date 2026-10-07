@@ -748,3 +748,119 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     console.log('✅ 朋友圈互动频率已改成分钟单位');
   }, 2000);
 })();
+// ====== v14：朋友圈互动频率改分钟（拦截版） ======
+(function(){
+  if (window.__v14Loaded) return;
+  window.__v14Loaded = true;
+
+  // 迁移旧数据（小时 → 分钟）
+  function mig(){
+    const c = state && state.chatSettings;
+    if (!c) return;
+    if (c.momentPostMax && c.momentPostMax < 60) {
+      c.momentPostMax = Math.round(c.momentPostMax * 60);
+      c.momentLikeMax = Math.round((c.momentLikeMax || 1) * 60);
+      c.momentCommentMax = Math.round((c.momentCommentMax || 1) * 60);
+      c.momentReplyMax = Math.round((c.momentReplyMax || 1) * 60);
+      save();
+    }
+  }
+
+  // 频率按分钟
+  window.momentRange = function(a, b){
+    a = Math.max(1, Number(a) || 1);
+    b = Math.max(a, Number(b) || a);
+    return a + Math.random() * (b - a);
+  };
+  window.scheduleMomentPost = function(){
+    clearTimeout(momentPostTimer);
+    const cs = state.chatSettings;
+    momentPostTimer = setTimeout(function(){ autoFriendMoment(); scheduleMomentPost(); }, momentRange(cs.momentPostMin, cs.momentPostMax) * 60000);
+  };
+  window.scheduleMomentLike = function(){
+    clearTimeout(momentLikeTimer);
+    const cs = state.chatSettings;
+    momentLikeTimer = setTimeout(function(){ autoFriendLike(); scheduleMomentLike(); }, momentRange(cs.momentLikeMin, cs.momentLikeMax) * 60000);
+  };
+  window.scheduleMomentComment = function(){
+    clearTimeout(momentCommentTimer);
+    const cs = state.chatSettings;
+    momentCommentTimer = setTimeout(function(){ autoFriendComment(); scheduleMomentComment(); }, momentRange(cs.momentCommentMin, cs.momentCommentMax) * 60000);
+  };
+  window.scheduleMomentReply = function(){
+    clearTimeout(momentReplyTimer);
+    const cs = state.chatSettings;
+    momentReplyTimer = setTimeout(function(){ autoFriendReply(); scheduleMomentReply(); }, momentRange(cs.momentReplyMin, cs.momentReplyMax) * 60000);
+  };
+
+  // 新弹窗（标题带 v14 标记，方便确认生效）
+  function openNewSettings(){
+    const c = state.chatSettings;
+    modal('朋友圈互动 · 分钟',
+      '<div class="desc" style="margin-bottom:12px;line-height:1.6">好友会随机主动发朋友圈、点赞、评论。每项独立计时，都按分钟设置。</div>' +
+      '<div style="font-weight:600;margin:6px 0">对方发朋友圈</div>' +
+      '<div class="field"><label>最短（分钟）</label><input id="mpMin" class="textinput" type="number" min="1" value="' + c.momentPostMin + '"></div>' +
+      '<div class="field"><label>最长（分钟）</label><input id="mpMax" class="textinput" type="number" min="1" value="' + c.momentPostMax + '"></div>' +
+      '<div style="font-weight:600;margin:14px 0 6px">对方点赞</div>' +
+      '<div class="field"><label>最短（分钟）</label><input id="mlMin" class="textinput" type="number" min="1" value="' + c.momentLikeMin + '"></div>' +
+      '<div class="field"><label>最长（分钟）</label><input id="mlMax" class="textinput" type="number" min="1" value="' + c.momentLikeMax + '"></div>' +
+      '<div style="font-weight:600;margin:14px 0 6px">对方评论</div>' +
+      '<div class="field"><label>最短（分钟）</label><input id="mcMin" class="textinput" type="number" min="1" value="' + c.momentCommentMin + '"></div>' +
+      '<div class="field"><label>最长（分钟）</label><input id="mcMax" class="textinput" type="number" min="1" value="' + c.momentCommentMax + '"></div>' +
+      '<div style="font-weight:600;margin:14px 0 6px">对方回复我的评论</div>' +
+      '<div class="field"><label>最短（分钟）</label><input id="mrMin" class="textinput" type="number" min="1" value="' + c.momentReplyMin + '"></div>' +
+      '<div class="field"><label>最长（分钟）</label><input id="mrMax" class="textinput" type="number" min="1" value="' + c.momentReplyMax + '"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:16px">' +
+      '<button class="action secondary" style="flex:1;margin:0" onclick="closeModal()">取消</button>' +
+      '<button class="action" style="flex:1;margin:0" onclick="window.__v14Save()">保存</button>' +
+      '</div>'
+    );
+  }
+
+  window.__v14Save = function(){
+    const c = state.chatSettings;
+    function v(id){ const el = document.getElementById(id); return Math.max(1, Number(el ? el.value : 1) || 1); }
+    let a, b;
+    a = v('mpMin'); b = v('mpMax'); if (b < a) b = a; c.momentPostMin = a; c.momentPostMax = b;
+    a = v('mlMin'); b = v('mlMax'); if (b < a) b = a; c.momentLikeMin = a; c.momentLikeMax = b;
+    a = v('mcMin'); b = v('mcMax'); if (b < a) b = a; c.momentCommentMin = a; c.momentCommentMax = b;
+    a = v('mrMin'); b = v('mrMax'); if (b < a) b = a; c.momentReplyMin = a; c.momentReplyMax = b;
+    save();
+    const d = document.getElementById('momentInteractionDesc');
+    if (d) d.textContent = '发动态 ' + c.momentPostMin + '–' + c.momentPostMax + '分钟 · 点赞 ' + c.momentLikeMin + '–' + c.momentLikeMax + '分钟 · 评论 ' + c.momentCommentMin + '–' + c.momentCommentMax + '分钟 · 回复 ' + c.momentReplyMin + '–' + c.momentReplyMax + '分钟';
+    closeModal();
+    if (typeof startMomentSchedulers === 'function') startMomentSchedulers();
+    showToast('朋友圈互动频率已保存（分钟）');
+  };
+
+  // 关键：捕获阶段拦截点击
+  document.addEventListener('click', function(e){
+    let node = e.target;
+    while (node && node !== document.body) {
+      const oc = node.getAttribute ? node.getAttribute('onclick') : null;
+      if (oc && oc.indexOf('showMomentInteractionSettings') !== -1) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        openNewSettings();
+        return;
+      }
+      node = node.parentNode;
+    }
+  }, true);
+
+  // 启动
+  function init(){
+    if (state && state.chatSettings) {
+      mig();
+      if (typeof startMomentSchedulers === 'function') startMomentSchedulers();
+      const c = state.chatSettings;
+      const d = document.getElementById('momentInteractionDesc');
+      if (d) d.textContent = '发动态 ' + c.momentPostMin + '–' + c.momentPostMax + '分钟 · 点赞 ' + c.momentLikeMin + '–' + c.momentLikeMax + '分钟 · 评论 ' + c.momentCommentMin + '–' + c.momentCommentMax + '分钟 · 回复 ' + c.momentReplyMin + '–' + c.momentReplyMax + '分钟';
+      console.log('✅ v14 已加载');
+    } else {
+      setTimeout(init, 500);
+    }
+  }
+  setTimeout(init, 2000);
+})();
