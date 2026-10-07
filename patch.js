@@ -1180,3 +1180,51 @@ console.log('✅ patch.js 精简版已加载');
 
   console.log('✅ v27 已加载');
 })();
+// ====== v28：气泡渲染性能优化 ======
+(function(){
+  if (window.__v28) return;
+  window.__v28 = true;
+
+  const LIMIT = 180; // 最多渲染 180 条气泡
+
+  function attachBubblesPatch() {
+    const bubbles = document.getElementById('bubbles');
+    if (!bubbles || bubbles._limitPatched) return;
+    bubbles._limitPatched = true;
+
+    const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+    if (!desc || !desc.set) return;
+    const origSet = desc.set;
+    const origGet = desc.get;
+
+    Object.defineProperty(bubbles, 'innerHTML', {
+      configurable: true,
+      enumerable: true,
+      get: function() { return origGet.call(this); },
+      set: function(v) {
+        if (typeof v === 'string' && v.length > 3000) {
+          try {
+            const count = (v.match(/data-idx="/g) || []).length;
+            if (count > LIMIT) {
+              const tmp = document.createElement('div');
+              origSet.call(tmp, v);
+              const rows = tmp.querySelectorAll('.bubbleRow');
+              const removeCount = rows.length - LIMIT;
+              for (let i = 0; i < removeCount; i++) rows[i].remove();
+              const notice = document.createElement('div');
+              notice.style.cssText = 'text-align:center;color:#aaa;font-size:12px;padding:12px 0;';
+              notice.textContent = '— 已折叠更早的 ' + removeCount + ' 条消息 —';
+              tmp.insertBefore(notice, tmp.firstChild);
+              v = tmp.innerHTML;
+            }
+          } catch(e) {}
+        }
+        origSet.call(this, v);
+      }
+    });
+    console.log('✅ #bubbles 已限制最多 ' + LIMIT + ' 条');
+  }
+
+  attachBubblesPatch();
+  setInterval(attachBubblesPatch, 2000);
+})();
