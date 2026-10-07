@@ -889,3 +889,125 @@ console.log('✅ patch.js 精简版已加载');
 
   console.log('✅ v24 已加载');
 })();
+// ====== v25：控制中心名字设置 ======
+(function(){
+  if (window.__v25) return;
+  window.__v25 = true;
+
+  // 默认值（只在第一次运行时写入）
+  function ensureDefaults() {
+    if (!window.state) { setTimeout(ensureDefaults, 500); return; }
+    if (state.mediaTitle === undefined) state.mediaTitle = 'ievan';
+    if (state.mediaSubtitle === undefined) state.mediaSubtitle = '在线';
+  }
+  ensureDefaults();
+
+  // 更新控制中心/锁屏显示
+  window.__updateMediaMeta = function(){
+    if (!('mediaSession' in navigator)) return;
+    try {
+      const title = (state && state.mediaTitle) || 'ievan';
+      const subtitle = (state && state.mediaSubtitle) || '在线';
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: title,
+        artist: subtitle,
+        album: '聊天保活',
+        artwork: [{src:'icon-192.PNG', sizes:'192x192', type:'image/png'}]
+      });
+      navigator.mediaSession.playbackState = 'playing';
+    } catch(e) {}
+  };
+
+  // 在"我的"页面构建设置卡片
+  function buildCard() {
+    const mePage = document.getElementById('me');
+    if (!mePage) { setTimeout(buildCard, 500); return; }
+    if (!state || state.mediaTitle === undefined) { setTimeout(buildCard, 500); return; }
+    const old = document.getElementById('mediaNameCard');
+    if (old) old.remove();
+
+    const card = document.createElement('div');
+    card.className = 'section card';
+    card.id = 'mediaNameCard';
+    const title = state.mediaTitle || 'ievan';
+    const subtitle = state.mediaSubtitle || '在线';
+    card.innerHTML = `
+      <div class="row" id="mediaNameRow" style="cursor:pointer">
+        <div class="icon settingsIcon iconSvg" style="background:#e9e9ec!important;color:#333!important">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+        </div>
+        <div class="rowmain">
+          <div class="title">控制中心名字</div>
+          <div class="desc" id="mediaNameDesc">${esc(title)} · ${esc(subtitle)}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>
+    `;
+
+    const pushCard = document.getElementById('pushCard');
+    if (pushCard && pushCard.nextSibling) mePage.insertBefore(card, pushCard.nextSibling);
+    else {
+      const first = mePage.querySelector('.section.card');
+      if (first && first.nextSibling) mePage.insertBefore(card, first.nextSibling);
+      else mePage.appendChild(card);
+    }
+
+    card.querySelector('#mediaNameRow').onclick = function(){
+      const t = state.mediaTitle || 'ievan';
+      const s = state.mediaSubtitle || '在线';
+      modal('控制中心名字',
+        '<div class="desc" style="margin-bottom:12px;line-height:1.6">这两个名字会显示在控制中心和锁屏的媒体卡片上。</div>' +
+        '<div class="field"><label>标题（大字）</label><input id="mediaTitleInput" class="textinput" maxlength="20" value="' + esc(t) + '"></div>' +
+        '<div class="field"><label>副标题（小字）</label><input id="mediaSubtitleInput" class="textinput" maxlength="20" value="' + esc(s) + '"></div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px">' +
+        '<button class="action secondary" style="flex:1;margin:0" onclick="closeModal()">取消</button>' +
+        '<button class="action" style="flex:1;margin:0" onclick="window.__saveMediaName()">保存</button>' +
+        '</div>'
+      );
+      setTimeout(function(){
+        const el = document.getElementById('mediaTitleInput');
+        if (el) el.focus();
+      }, 100);
+    };
+  }
+
+  window.__saveMediaName = function(){
+    const tEl = document.getElementById('mediaTitleInput');
+    const sEl = document.getElementById('mediaSubtitleInput');
+    const t = (tEl && tEl.value || '').trim() || 'ievan';
+    const s = (sEl && sEl.value || '').trim() || '在线';
+    state.mediaTitle = t;
+    state.mediaSubtitle = s;
+    save().then(function(){
+      const d = document.getElementById('mediaNameDesc');
+      if (d) d.textContent = t + ' · ' + s;
+      if (typeof window.__updateMediaMeta === 'function') window.__updateMediaMeta();
+      closeModal();
+      if (typeof showToast === 'function') showToast('已保存');
+    });
+  };
+
+  // 保活时自动应用自定义名字
+  const origStart = window.startKeepAlive;
+  window.startKeepAlive = function(){
+    if (origStart) origStart();
+    setTimeout(function(){
+      if (typeof window.__updateMediaMeta === 'function') window.__updateMediaMeta();
+    }, 100);
+  };
+
+  // 切到"我的"页面时刷新卡片
+  const origShowPage = window.showPage;
+  window.showPage = function(id){
+    const r = origShowPage ? origShowPage.apply(this, arguments) : undefined;
+    if (id === 'me') setTimeout(buildCard, 100);
+    return r;
+  };
+
+  setTimeout(buildCard, 2500);
+  console.log('✅ v25 控制中心名字设置已加载');
+})();
