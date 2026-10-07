@@ -598,3 +598,30 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     console.log('✅ 字卡库多选模式 v10 已加载');
   }, 2500);
 })();
+// ====== v11：修复卡片 id 绑定（接管 renderCards） ======
+(function() {
+  if (window.__v11Loaded) return;
+  window.__v11Loaded = true;
+
+  const origRenderCards = window.renderCards;
+  window.renderCards = function() {
+    // 调用原函数生成 DOM
+    if (origRenderCards) origRenderCards.apply(this, arguments);
+
+    // 按筛选顺序给每张卡片打上正确 id
+    const searchEl = document.getElementById('cardSearch');
+    const q = (searchEl && searchEl.value || '').trim().toLowerCase();
+    const arr = state.cards.filter(c => {
+      if (currentType !== '全部' && c.type !== currentType) return false;
+      if (currentGroup !== '全部' && c.group !== currentGroup) return false;
+      if (q) { const t = (c.text || '').toLowerCase(); if (!t.includes(q)) return false; }
+      return true;
+    });
+    const items = document.querySelectorAll('#cardsList .cardItem');
+    items.forEach((item, idx) => {
+      if (idx < arr.length) item.dataset.cardId = String(arr[idx].id);
+    });
+  };
+
+  console.log('✅ v11 卡片 id 绑定修复已加载');
+})();
