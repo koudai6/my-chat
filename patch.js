@@ -213,3 +213,36 @@ if (typeof startActiveSendScheduler === 'function') {
 }
 
 console.log('✅ 性能与回复体验优化补丁已加载');
+// ====== 锁定横向滑动补丁 ======
+(function() {
+  const style = document.createElement('style');
+  style.textContent = `
+    /* 聊天消息区：禁止横向滑动，只允许上下滚动 */
+    #bubbles {
+      overflow-x: hidden !important;
+      touch-action: pan-y !important;
+      overscroll-behavior-x: none !important;
+      max-width: 100% !important;
+      width: 100% !important;
+    }
+    /* 每条气泡行：不允许溢出 */
+    #bubbles .bubbleRow,
+    #bubbles .msgWrap,
+    #bubbles .bubble {
+      max-width: 100% !important;
+      min-width: 0 !important;
+    }
+    /* 图片：不超过气泡宽度 */
+    #bubbles img {
+      max-width: 100% !important;
+      height: auto;
+    }
+    /* 整个页面：禁止横向滚动 */
+    html, body, .app {
+      overflow-x: hidden !important;
+      max-width: 100vw !important;
+    }
+  `;
+  document.head.appendChild(style);
+  console.log('✅ 锁定横向滑动补丁已加载');
+})();
