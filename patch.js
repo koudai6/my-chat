@@ -1186,3 +1186,67 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   }
 
 })();
+// ====== 修复字卡按钮（事件委托版） ======
+(function(){
+  if (window.__cardBtnsFix) return;
+  window.__cardBtnsFix = true;
+
+  // 获取当前筛选后的字卡数组（和 renderCards 里过滤逻辑一致）
+  function getCurrentCards() {
+    const searchEl = document.getElementById('cardSearch');
+    const q = (searchEl && searchEl.value || '').trim().toLowerCase();
+    return state.cards.filter(c => {
+      if (currentType !== '全部' && c.type !== currentType) return false;
+      if (currentGroup !== '全部' && c.group !== currentGroup) return false;
+      if (q) { const t = (c.text || '').toLowerCase(); if (!t.includes(q)) return false; }
+      return true;
+    });
+  }
+
+  // 从卡片 DOM 里拿到正确的 id（优先 dataset，其次按索引）
+  function getCardId(item) {
+    if (item.dataset.cardId) return item.dataset.cardId;
+    const items = Array.from(document.querySelectorAll('#cardsList .cardItem'));
+    const idx = items.indexOf(item);
+    if (idx < 0) return null;
+    const arr = getCurrentCards();
+    if (idx >= arr.length) return null;
+    const id = String(arr[idx].id);
+    item.dataset.cardId = id;
+    return id;
+  }
+
+  // 全局捕获阶段：拦截卡片上的三个按钮
+  document.addEventListener('click', function(e){
+    // 只在字卡库页面、非多选模式下生效
+    const cardsPage = document.getElementById('cards');
+    if (!cardsPage || !cardsPage.classList.contains('active')) return;
+    if (window._multiOn) return; // 多选模式下不处理，交给多选逻辑
+
+    const item = e.target.closest('#cardsList .cardItem');
+    if (!item) return;
+
+    const btn = e.target.closest('button');
+    if (!btn) return;
+
+    // 判断按钮类型
+    let action = null;
+    if (btn.classList.contains('switch')) action = 'toggle';
+    else if (btn.getAttribute('aria-label') === '编辑') action = 'edit';
+    else if (btn.getAttribute('aria-label') === '删除') action = 'delete';
+    else return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+
+    const id = getCardId(item);
+    if (!id) return;
+
+    if (action === 'toggle' && typeof toggleCard === 'function') toggleCard(id);
+    else if (action === 'edit' && typeof editCard === 'function') editCard(id);
+    else if (action === 'delete' && typeof deleteCard === 'function') deleteCard(id);
+  }, true);
+
+  console.log('✅ 字卡按钮事件委托已启用');
+})();
