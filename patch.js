@@ -1250,3 +1250,78 @@ console.log('✅ 性能与回复体验优化补丁已加载');
 
   console.log('✅ 字卡按钮事件委托已启用');
 })();
+// ====== 表情包布局修复 + 聊天滚动到底部 ======
+(function(){
+
+  // 1. 表情包面板布局修复（避免重叠）
+  const style = document.createElement('style');
+  style.textContent = `
+    .stickerPanel {
+      display: grid !important;
+      grid-template-columns: repeat(4, 1fr) !important;
+      gap: 8px !important;
+      align-items: start !important;
+      grid-auto-rows: 0 !important;
+    }
+    .stickerItem {
+      position: relative !important;
+      width: 100% !important;
+      height: 0 !important;
+      padding-bottom: 100% !important;
+      aspect-ratio: auto !important;
+      border-radius: 10px !important;
+      overflow: hidden !important;
+      background: #fff !important;
+    }
+    .stickerItem img {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      display: block !important;
+    }
+    .stickerDel {
+      position: absolute !important;
+      top: 4px !important;
+      right: 4px !important;
+      z-index: 3 !important;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // 2. 让聊天气泡自动滚到底部（多重延迟，确保内容高度计算完成）
+  if (!window.__scrollFix) {
+    window.__scrollFix = true;
+
+    function scrollBubblesToBottom() {
+      const b = document.getElementById('bubbles');
+      if (b) b.scrollTop = b.scrollHeight;
+    }
+
+    const origRenderBubbles = window.renderBubbles;
+    window.renderBubbles = function() {
+      const r = origRenderBubbles ? origRenderBubbles.apply(this, arguments) : undefined;
+      requestAnimationFrame(scrollBubblesToBottom);
+      setTimeout(scrollBubblesToBottom, 50);
+      setTimeout(scrollBubblesToBottom, 200);
+      setTimeout(scrollBubblesToBottom, 500);
+      return r;
+    };
+
+    const origShowPage = window.showPage;
+    window.showPage = function(id) {
+      const r = origShowPage ? origShowPage.apply(this, arguments) : undefined;
+      if (id === 'chat') {
+        requestAnimationFrame(scrollBubblesToBottom);
+        setTimeout(scrollBubblesToBottom, 50);
+        setTimeout(scrollBubblesToBottom, 150);
+        setTimeout(scrollBubblesToBottom, 350);
+      }
+      return r;
+    };
+  }
+
+  console.log('✅ 表情包布局 + 聊天滚动修复已加载');
+})();
