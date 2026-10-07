@@ -867,3 +867,160 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   setInterval(fixBar, 300);
   console.log('✅ 多选栏位置修正已加载');
 })();
+// ====== 多选点击修复 v3 ======
+(function() {
+  let selectedIds = new Set();
+
+  function getCardId(item) {
+    const btns = item.querySelectorAll('button[onclick]');
+    for (const b of btns) {
+      const oc = b.getAttribute('onclick') || '';
+      let m = oc.match(/toggleCard\((.+?)\)/);
+      if (!m) m = oc.match(/editCard\((.+?)\)/);
+      if (!m) m = oc.match(/deleteCard\((.+?)\)/);
+      if (m) {
+        try { return String(JSON.parse(m[1])); }
+        catch(err) { return String(m[1]).replace(/^['"]|['"]$/g, ''); }
+      }
+    }
+    return null;
+  }
+
+  function updateBar() {
+    const bar = document.getElementById('multiBar');
+    if (!bar) return;
+    const noSel = selectedIds.size === 0;
+    ['mbMove','mbToggle','mbDelete'].forEach(id => {
+      const b = bar.querySelector('#' + id);
+      if (b) b.disabled = noSel;
+    });
+    const selBtn = document.querySelector('#cards .multi-select-btn');
+    if (selBtn) selBtn.textContent = selectedIds.size > 0 ? '完成·' + selectedIds.size : '完成';
+  }
+
+  function bindList() {
+    const list = document.getElementById('cardsList');
+    if (!list || list._v3Bound) return;
+    list._v3Bound = true;
+    list.addEventListener('click', function(e) {
+      const cardsPage = document.getElementById('cards');
+      if (!cardsPage || !cardsPage.classList.contains('multi-mode')) return;
+      const item = e.target.closest('.cardItem');
+      if (!item || !item.classList.contains('multiSelect')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      let id = item.dataset.multiId;
+      if (!id) { id = getCardId(item); if (id) item.dataset.multiId = id; }
+      if (!id) return;
+      const check = item.querySelector('.multiCheck');
+      if (!check) return;
+      if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+        check.classList.remove('checked');
+      } else {
+        selectedIds.add(id);
+        check.classList.add('checked');
+      }
+      updateBar();
+    }, true);
+  }
+
+  function patchButtons() {
+    const bar = document.getElementById('multiBar');
+    if (!bar || bar._v3Patched) return;
+    bar._v3Patched = true;
+
+    bar.querySelector('#mbSelectAll').onclick = function() {
+      const items = document.querySelectorAll('#cardsList .cardItem');
+      const allSel = items.length > 0 && Array.from(items).every(it => it.dataset.multiId && selectedIds.has(it.dataset.multiId));
+      if (allSel) {
+        items.forEach(it => {
+          if (it.dataset.multiId) selectedIds.delete(it.dataset.multiId);
+          it.querySelector('.multiCheck')?.classList.remove('checked');
+        });
+      } else {
+        items.forEach(it => {
+          if (!it.dataset.multiId) it.dataset.multiId = getCardId(it);
+          if (it.dataset.multiId) {
+            selectedIds.add(it.dataset.multiId);
+            it.querySelector('.multiCheck')?.classList.add('checked');
+          }
+        });
+      }
+      updateBar();
+    };
+
+    bar.querySelector('#mbMove').onclick = function() {
+      if (selectedIds.size === 0) return;
+      const groups = [{id:'public',name:'公共（未分组）'}, ...state.groups.filter(g=>g.id!=='public')];
+      let html = '<div class="desc" style="margin-bottom:12px">将选中的 <b>' + selectedIds.size + '</b> 张字卡移动到：</div>';
+      html += '<div style="max-height:52vh;overflow:auto;background:#f6f6f8;border-radius:12px">';
+      groups.forEach(g => {
+        html += '<div class="row" style="cursor:pointer;border-bottom:1px solid #ececf0;padding:14px" onclick="window._v3Move(\'' + g.id + '\')"><div class="rowmain"><div class="title">' + esc(g.name) + '</div></div><span class="chev">›</span></div>';
+      });
+      html += '</div>';
+      html += '<button class="action" style="margin-top:14px" onclick="window._v3Create()">＋ 新建分组并移入</button>';
+      modal('移动到分组', html);
+    };
+
+    bar.querySelector('#mbToggle').onclick = function() {
+      if (selectedIds.size === 0) return;
+      const cards = state.cards.filter(c => selectedIds.has(String(c.id)));
+      if (!cards.length) return;
+      const allEnabled = cards.every(c => c.enabled !== false);
+      const newState = !allEnabled;
+      cards.forEach(c => c.enabled = newState);
+      save().then(() => {
+        showToast(newState ? '已启用 ' + cards.length + ' 张' : '已停用 ' + cards.length + ' 张');
+        renderCards();
+        selectedIds.clear();
+        setTimeout(updateBar, 80);
+      });
+    };
+
+    bar.querySelector('#mbDelete').onclick = function() {
+      if (selectedIds.size === 0) return;
+      if (!confirm('确定删除选中的 ' + selectedIds.size + ' 张字卡吗？此操作不可恢复。')) return;
+      state.cards = state.cards.filter(c => !selectedIds.has(String(c.id)));
+      save().then(() => {
+        showToast('已删除');
+        renderCards();
+        selectedIds.clear();
+        setTimeout(updateBar, 80);
+      });
+    };
+  }
+
+  window._v3Move = function(gid) {
+    let count = 0;
+    state.cards.forEach(c => { if (selectedIds.has(String(c.id))) { c.group = gid; count++; } });
+    save().then(() => {
+      closeModal();
+      showToast('已移动 ' + count + ' 张');
+      selectedIds.clear();
+      renderCards();
+      setTimeout(updateBar, 80);
+    });
+  };
+
+  window._v3Create = function() {
+    const name = prompt('新建分组名称：');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+    if (state.groups.some(g => String(g.name).trim() === trimmed)) { alert('分组已存在'); return; }
+    const gid = 'g' + Date.now() + Math.random().toString(36).slice(2,7);
+    state.groups.push({id: gid, name: trimmed, enabled: true, probability: 50});
+    let count = 0;
+    state.cards.forEach(c => { if (selectedIds.has(String(c.id))) { c.group = gid; count++; } });
+    save().then(() => {
+      closeModal();
+      showToast('已新建并移动 ' + count + ' 张');
+      selectedIds.clear();
+      renderCards();
+      setTimeout(updateBar, 80);
+    });
+  };
+
+  setInterval(() => { bindList(); patchButtons(); }, 400);
+  console.log('✅ 多选点击修复 v3 已加载');
+})();
