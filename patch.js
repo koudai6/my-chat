@@ -338,29 +338,20 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   }
   setInterval(fixBar, 300);
 })();
-
-// ====== 字卡库多选模式 v7（最稳版） ======
+// ====== 字卡库多选模式 v8（终极版） ======
 (function() {
-  if (window.__v7Loaded) return;
-  window.__v7Loaded = true;
+  if (window.__v8Loaded) return;
+  window.__v8Loaded = true;
 
-  window._v7Sel = new Set();
-
-  // 顶部验证标签：3 秒后弹出红色 "v7"
-  setTimeout(() => {
-    const tag = document.createElement('div');
-    tag.style.cssText = 'position:fixed;top:60px;left:10px;background:#ff3b30;color:#fff;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;z-index:999999;font-family:-apple-system';
-    tag.textContent = '多选 v7 已加载';
-    document.body.appendChild(tag);
-    setTimeout(() => tag.remove(), 4000);
-  }, 3000);
+  window._v8Sel = new Set();
+  window._v8Multi = false;
 
   const styleEl = document.createElement('style');
   styleEl.textContent = `
     .multi-select-btn{width:auto!important;height:38px!important;border-radius:19px!important;padding:0 16px!important;font-size:.82rem!important;font-weight:600!important;background:#f0f0f4!important;color:#1a1a1e!important;display:grid;place-items:center;box-shadow:none!important;margin-right:8px;font-family:inherit;cursor:pointer}
     #cards.multi-mode .header .plus:not(.multi-select-btn){display:none!important}
     #cards.multi-mode #cardsList{padding-bottom:120px}
-    .cardItem.multiSelect{padding-left:48px!important;position:relative;cursor:pointer;-webkit-user-select:none;user-select:none}
+    .cardItem.multiSelect{padding-left:48px!important;position:relative;cursor:pointer}
     .cardItem.multiSelect .multiCheck{position:absolute;left:15px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;border:1.5px solid #c7c7cc;display:grid;place-items:center;background:#fff;transition:.15s;pointer-events:none}
     .cardItem.multiSelect .multiCheck.checked{background:#1a1a1e;border-color:#1a1a1e;color:#fff}
     .cardItem.multiSelect .multiCheck svg{width:13px;height:13px;display:none}
@@ -374,21 +365,23 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   `;
   document.head.appendChild(styleEl);
 
-  function getCardId(item) {
-    if (item.dataset.multiId) return item.dataset.multiId;
-    const btns = item.querySelectorAll('button[onclick]');
-    for (const b of btns) {
-      const oc = b.getAttribute('onclick') || '';
-      const m = oc.match(/(?:toggleCard|editCard|deleteCard)\((.+?)\)/);
-      if (m) {
-        let id;
-        try { id = String(JSON.parse(m[1])); }
-        catch(e) { id = String(m[1]).replace(/^['"]|['"]$/g, ''); }
-        item.dataset.multiId = id;
-        return id;
-      }
-    }
-    return null;
+  // 按索引给每张可见卡片分配 state.cards 里的 id
+  function getFilteredIds() {
+    const q = (document.getElementById('cardSearch') && document.getElementById('cardSearch').value || '').trim().toLowerCase();
+    return state.cards.filter(c => {
+      if (currentType !== '全部' && c.type !== currentType) return false;
+      if (currentGroup !== '全部' && c.group !== currentGroup) return false;
+      if (q) { const t = (c.text || '').toLowerCase(); if (!t.includes(q)) return false; }
+      return true;
+    }).map(c => String(c.id));
+  }
+
+  function assignIds() {
+    const items = document.querySelectorAll('#cardsList .cardItem');
+    const ids = getFilteredIds();
+    if (items.length !== ids.length) return false;
+    items.forEach((item, idx) => { item.dataset.v8id = ids[idx]; });
+    return true;
   }
 
   function createCheck() {
@@ -398,17 +391,35 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     return c;
   }
 
+  function applyMultiToCards() {
+    if (!window._v8Multi) return;
+    const page = document.getElementById('cards');
+    if (!page) return;
+    page.classList.add('multi-mode');
+    if (!assignIds()) return;
+    document.querySelectorAll('#cardsList .cardItem').forEach(item => {
+      item.classList.add('multiSelect');
+      if (!item.querySelector('.multiCheck')) item.insertBefore(createCheck(), item.firstChild);
+      const id = item.dataset.v8id;
+      const check = item.querySelector('.multiCheck');
+      if (id && window._v8Sel.has(id)) check.classList.add('checked');
+      else check.classList.remove('checked');
+    });
+    createBar();
+    updateBar();
+  }
+
   function updateBar() {
     const bar = document.getElementById('multiBar');
     if (!bar) return;
-    const noSel = window._v7Sel.size === 0;
+    const noSel = window._v8Sel.size === 0;
     ['mbMove','mbToggle','mbDelete'].forEach(x => {
       const b = bar.querySelector('#' + x);
       if (b) b.disabled = noSel;
     });
     const selBtn = document.querySelector('#cards .multi-select-btn');
-    if (selBtn) selBtn.textContent = window._v7Sel.size > 0 ? '完成·' + window._v7Sel.size : '完成';
-    const cards = state.cards.filter(c => window._v7Sel.has(String(c.id)));
+    if (selBtn) selBtn.textContent = window._v8Sel.size > 0 ? '完成·' + window._v8Sel.size : '完成';
+    const cards = state.cards.filter(c => window._v8Sel.has(String(c.id)));
     const toggleText = bar.querySelector('#mbToggleText');
     if (toggleText) {
       const allEnabled = cards.length > 0 && cards.every(c => c.enabled !== false);
@@ -432,79 +443,88 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     bar.querySelector('#mbMove').onclick = moveSelected;
     bar.querySelector('#mbToggle').onclick = toggleSelected;
     bar.querySelector('#mbDelete').onclick = deleteSelected;
+  }
+
+  function selectAllCurrent() {
+    const items = document.querySelectorAll('#cardsList .cardItem');
+    const allSel = items.length > 0 && Array.from(items).every(it => it.dataset.v8id && window._v8Sel.has(it.dataset.v8id));
+    items.forEach(it => {
+      const id = it.dataset.v8id;
+      const c = it.querySelector('.multiCheck');
+      if (!id) return;
+      if (allSel) { window._v8Sel.delete(id); if (c) c.classList.remove('checked'); }
+      else { window._v8Sel.add(id); if (c) c.classList.add('checked'); }
+    });
     updateBar();
   }
 
-  // 核心：把每张卡片克隆一份替换，扔掉原有的 onclick
-  function rebindCards() {
-    const page = document.getElementById('cards');
-    if (!page || !page.classList.contains('multi-mode')) return;
-
-    document.querySelectorAll('#cardsList .cardItem').forEach(item => {
-      if (item.classList.contains('multiSelect')) return; // 已处理过
-
-      const id = getCardId(item);
-      if (!id) return;
-
-      const clone = item.cloneNode(true);
-      clone.classList.add('multiSelect');
-      clone.dataset.multiId = id;
-      clone.insertBefore(createCheck(), clone.firstChild);
-
-      // 关键：直接覆盖 onclick，彻底扔掉原来的编辑/开关逻辑
-      clone.onclick = function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const sid = this.dataset.multiId;
-        if (!sid) return;
-        const check = this.querySelector('.multiCheck');
-        if (window._v7Sel.has(sid)) {
-          window._v7Sel.delete(sid);
-          if (check) check.classList.remove('checked');
-        } else {
-          window._v7Sel.add(sid);
-          if (check) check.classList.add('checked');
-        }
-        updateBar();
-      };
-
-      item.parentNode.replaceChild(clone, item);
+  function moveSelected() {
+    if (window._v8Sel.size === 0) return;
+    const groups = [{id:'public',name:'公共（未分组）'}, ...state.groups.filter(g=>g.id!=='public')];
+    let html = '<div class="desc" style="margin-bottom:12px">将选中的 <b>' + window._v8Sel.size + '</b> 张字卡移动到：</div><div style="max-height:52vh;overflow:auto;background:#f6f6f8;border-radius:12px">';
+    groups.forEach(g => {
+      const count = state.cards.filter(c => window._v8Sel.has(String(c.id)) && c.group === g.id).length;
+      html += '<div class="row" style="cursor:pointer;border-bottom:1px solid #ececf0;padding:14px" onclick="window._v8Move(\'' + g.id + '\')"><div class="rowmain"><div class="title">' + esc(g.name) + '</div>' + (count ? '<div class="desc">已在该组：' + count + ' 张</div>' : '') + '</div><span class="chev">›</span></div>';
     });
-
-    createBar();
+    html += '</div><button class="action" style="margin-top:14px" onclick="window._v8Create()">＋ 新建分组并移入</button>';
+    modal('移动到分组', html);
   }
 
-  function enterMulti() {
-    const page = document.getElementById('cards');
-    if (!page) return;
-    page.classList.add('multi-mode');
-    window._v7Sel.clear();
-    rebindCards();
-    setTimeout(() => {
-      const btn = page.querySelector('.multi-select-btn');
-      if (btn) btn.textContent = '完成';
-    }, 30);
+  window._v8Move = function(gid) {
+    let count = 0;
+    state.cards.forEach(c => { if (window._v8Sel.has(String(c.id))) { c.group = gid; count++; } });
+    save().then(() => {
+      closeModal();
+      showToast('已移动 ' + count + ' 张');
+      window._v8Sel.clear();
+      renderCards();
+      setTimeout(() => { applyMultiToCards(); updateBar(); }, 100);
+    });
+  };
+
+  window._v8Create = function() {
+    const name = prompt('新建分组名称：');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+    if (state.groups.some(g => String(g.name).trim() === trimmed)) { alert('分组已存在'); return; }
+    const gid = 'g' + Date.now() + Math.random().toString(36).slice(2,7);
+    state.groups.push({id: gid, name: trimmed, enabled: true, probability: 50});
+    let count = 0;
+    state.cards.forEach(c => { if (window._v8Sel.has(String(c.id))) { c.group = gid; count++; } });
+    save().then(() => {
+      closeModal();
+      showToast('已新建并移动 ' + count + ' 张');
+      window._v8Sel.clear();
+      renderCards();
+      setTimeout(() => { applyMultiToCards(); updateBar(); }, 100);
+    });
+  };
+
+  function toggleSelected() {
+    if (window._v8Sel.size === 0) return;
+    const cards = state.cards.filter(c => window._v8Sel.has(String(c.id)));
+    if (!cards.length) return;
+    const allEnabled = cards.every(c => c.enabled !== false);
+    const newState = !allEnabled;
+    cards.forEach(c => c.enabled = newState);
+    save().then(() => {
+      showToast(newState ? '已启用 ' + cards.length + ' 张' : '已停用 ' + cards.length + ' 张');
+      window._v8Sel.clear();
+      renderCards();
+      setTimeout(() => { applyMultiToCards(); updateBar(); }, 100);
+    });
   }
 
-  function exitMulti() {
-    const page = document.getElementById('cards');
-    if (!page) return;
-    page.classList.remove('multi-mode');
-    window._v7Sel.clear();
-    if (typeof renderCards === 'function') renderCards();
-    const bar = document.getElementById('multiBar');
-    if (bar) bar.remove();
-    setTimeout(() => {
-      const btn = page.querySelector('.multi-select-btn');
-      if (btn) btn.textContent = '选择';
-    }, 30);
-  }
-
-  function toggleMulti() {
-    const page = document.getElementById('cards');
-    if (!page) return;
-    if (page.classList.contains('multi-mode')) exitMulti();
-    else enterMulti();
+  function deleteSelected() {
+    if (window._v8Sel.size === 0) return;
+    if (!confirm('确定删除选中的 ' + window._v8Sel.size + ' 张字卡吗？此操作不可恢复。')) return;
+    state.cards = state.cards.filter(c => !window._v8Sel.has(String(c.id)));
+    save().then(() => {
+      showToast('已删除');
+      window._v8Sel.clear();
+      renderCards();
+      setTimeout(() => { applyMultiToCards(); updateBar(); }, 100);
+    });
   }
 
   function injectSelectButton() {
@@ -517,111 +537,74 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     if (!plusBtn) return;
     const btn = document.createElement('button');
     btn.className = 'plus multi-select-btn';
-    btn.textContent = '选择';
+    btn.textContent = window._v8Multi ? '完成' : '选择';
     btn.onclick = toggleMulti;
     header.insertBefore(btn, plusBtn);
   }
 
-  function selectAllCurrent() {
-    const items = document.querySelectorAll('#cardsList .cardItem');
-    const allSel = items.length > 0 && Array.from(items).every(it => it.dataset.multiId && window._v7Sel.has(it.dataset.multiId));
-    if (allSel) {
-      items.forEach(it => {
-        if (it.dataset.multiId) window._v7Sel.delete(it.dataset.multiId);
-        const c = it.querySelector('.multiCheck'); if (c) c.classList.remove('checked');
-      });
+  function toggleMulti() {
+    if (window._v8Multi) {
+      window._v8Multi = false;
+      window._v8Sel.clear();
+      const page = document.getElementById('cards');
+      if (page) page.classList.remove('multi-mode');
+      const bar = document.getElementById('multiBar');
+      if (bar) bar.remove();
+      if (typeof renderCards === 'function') renderCards();
+      setTimeout(injectSelectButton, 50);
     } else {
-      items.forEach(it => {
-        if (it.dataset.multiId) {
-          window._v7Sel.add(it.dataset.multiId);
-          const c = it.querySelector('.multiCheck'); if (c) c.classList.add('checked');
-        }
-      });
+      window._v8Multi = true;
+      window._v8Sel.clear();
+      applyMultiToCards();
+      setTimeout(injectSelectButton, 50);
+    }
+  }
+
+  // 全局捕获阶段拦截点击，阻止原按钮 onclick 触发
+  document.addEventListener('click', function(e) {
+    if (!window._v8Multi) return;
+    const item = e.target.closest('#cardsList .cardItem');
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    let id = item.dataset.v8id;
+    if (!id) { if (!assignIds()) return; id = item.dataset.v8id; if (!id) return; }
+    const check = item.querySelector('.multiCheck');
+    if (!check) return;
+    if (window._v8Sel.has(id)) {
+      window._v8Sel.delete(id);
+      check.classList.remove('checked');
+    } else {
+      window._v8Sel.add(id);
+      check.classList.add('checked');
     }
     updateBar();
-  }
+  }, true);
 
-  function moveSelected() {
-    if (window._v7Sel.size === 0) return;
-    const groups = [{id:'public',name:'公共（未分组）'}, ...state.groups.filter(g=>g.id!=='public')];
-    let html = '<div class="desc" style="margin-bottom:12px">将选中的 <b>' + window._v7Sel.size + '</b> 张字卡移动到：</div><div style="max-height:52vh;overflow:auto;background:#f6f6f8;border-radius:12px">';
-    groups.forEach(g => {
-      const count = state.cards.filter(c => window._v7Sel.has(String(c.id)) && c.group === g.id).length;
-      html += '<div class="row" style="cursor:pointer;border-bottom:1px solid #ececf0;padding:14px" onclick="window._v7Move(\'' + g.id + '\')"><div class="rowmain"><div class="title">' + esc(g.name) + '</div>' + (count ? '<div class="desc">已在该组：' + count + ' 张</div>' : '') + '</div><span class="chev">›</span></div>';
-    });
-    html += '</div><button class="action" style="margin-top:14px" onclick="window._v7Create()">＋ 新建分组并移入</button>';
-    modal('移动到分组', html);
-  }
-
-  window._v7Move = function(gid) {
-    let count = 0;
-    state.cards.forEach(c => { if (window._v7Sel.has(String(c.id))) { c.group = gid; count++; } });
-    save().then(() => {
-      closeModal();
-      showToast('已移动 ' + count + ' 张');
-      window._v7Sel.clear();
-      renderCards();
-      setTimeout(() => { rebindCards(); updateBar(); }, 100);
-    });
-  };
-
-  window._v7Create = function() {
-    const name = prompt('新建分组名称：');
-    if (!name || !name.trim()) return;
-    const trimmed = name.trim();
-    if (state.groups.some(g => String(g.name).trim() === trimmed)) { alert('分组已存在'); return; }
-    const gid = 'g' + Date.now() + Math.random().toString(36).slice(2,7);
-    state.groups.push({id: gid, name: trimmed, enabled: true, probability: 50});
-    let count = 0;
-    state.cards.forEach(c => { if (window._v7Sel.has(String(c.id))) { c.group = gid; count++; } });
-    save().then(() => {
-      closeModal();
-      showToast('已新建并移动 ' + count + ' 张');
-      window._v7Sel.clear();
-      renderCards();
-      setTimeout(() => { rebindCards(); updateBar(); }, 100);
-    });
-  };
-
-  function toggleSelected() {
-    if (window._v7Sel.size === 0) return;
-    const cards = state.cards.filter(c => window._v7Sel.has(String(c.id)));
-    if (!cards.length) return;
-    const allEnabled = cards.every(c => c.enabled !== false);
-    const newState = !allEnabled;
-    cards.forEach(c => c.enabled = newState);
-    save().then(() => {
-      showToast(newState ? '已启用 ' + cards.length + ' 张' : '已停用 ' + cards.length + ' 张');
-      window._v7Sel.clear();
-      renderCards();
-      setTimeout(() => { rebindCards(); updateBar(); }, 100);
-    });
-  }
-
-  function deleteSelected() {
-    if (window._v7Sel.size === 0) return;
-    if (!confirm('确定删除选中的 ' + window._v7Sel.size + ' 张字卡吗？此操作不可恢复。')) return;
-    state.cards = state.cards.filter(c => !window._v7Sel.has(String(c.id)));
-    save().then(() => {
-      showToast('已删除');
-      window._v7Sel.clear();
-      renderCards();
-      setTimeout(() => { rebindCards(); updateBar(); }, 100);
-    });
-  }
-
-  // 每 400ms 扫描一次：如果多选模式还开着，但卡片没有 multiSelect（被重新渲染了），就重新绑定
-  setInterval(() => {
+  // 每 500ms 检查：重新渲染后自动补回多选状态
+  setInterval(function() {
     const page = document.getElementById('cards');
-    if (!page || !page.classList.contains('multi-mode')) return;
-    const needRebind = Array.from(document.querySelectorAll('#cardsList .cardItem')).some(it => !it.classList.contains('multiSelect'));
-    if (needRebind) rebindCards();
-  }, 400);
+    if (!page) return;
+    if (!window._v8Multi) {
+      if (page.classList.contains('multi-mode')) {
+        page.classList.remove('multi-mode');
+        const bar = document.getElementById('multiBar');
+        if (bar) bar.remove();
+      }
+      return;
+    }
+    if (!page.classList.contains('multi-mode')) page.classList.add('multi-mode');
+    const items = document.querySelectorAll('#cardsList .cardItem');
+    let needReapply = false;
+    items.forEach(it => { if (!it.classList.contains('multiSelect')) needReapply = true; });
+    if (needReapply) applyMultiToCards();
+  }, 500);
 
   setTimeout(() => {
     injectSelectButton();
     const obs = new MutationObserver(() => injectSelectButton());
     obs.observe(document.body, { childList: true, subtree: false });
-    console.log('✅ 字卡库多选模式 v7 已加载');
+    console.log('✅ 字卡库多选模式 v8 已加载');
   }, 2500);
 })();
