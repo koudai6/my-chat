@@ -1089,3 +1089,40 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   setTimeout(function(){ injectButton(); ensure(); }, 2500);
   console.log('✅ v17 已加载');
 })();
+// ====== v19 ======
+(function(){
+  if (window.__v19) return; window.__v19 = true;
+  window.__n = { post: 0, like: 0, comment: 0, reply: 0 };
+  function pick(a, b){ a=Math.max(1,a||1); b=Math.max(a,b||a); return (a+Math.random()*(b-a))*60000; }
+  function sched(k, a, b){ window.__n[k] = Date.now() + pick(a, b); }
+  function tick(){
+    if (!window.state || !state.chatSettings) return;
+    const c = state.chatSettings, t = Date.now();
+    ['post','like','comment','reply'].forEach(function(k){
+      if (!window.__n[k]) { sched(k, c['moment'+k.charAt(0).toUpperCase()+k.slice(1)+'Min'], c['moment'+k.charAt(0).toUpperCase()+k.slice(1)+'Max']); return; }
+      if (t >= window.__n[k]) {
+        const fn = { post:'autoFriendMoment', like:'autoFriendLike', comment:'autoFriendComment', reply:'autoFriendReply' }[k];
+        if (typeof window[fn] === 'function') try { window[fn](); } catch(e){}
+        sched(k, c['moment'+k.charAt(0).toUpperCase()+k.slice(1)+'Min'], c['moment'+k.charAt(0).toUpperCase()+k.slice(1)+'Max']);
+      }
+    });
+  }
+  setInterval(tick, 10000);
+  // 注入 ⚡ 按钮
+  setInterval(function(){
+    const top = document.querySelector('#moments .momActionsTop');
+    if (!top || top.querySelector('.v19btn')) return;
+    const b = document.createElement('button');
+    b.className = 'momBell v19btn';
+    b.textContent = '⚡';
+    b.style.cssText = 'background:rgba(255,255,255,.9);color:#222;font-weight:700';
+    b.onclick = function(){
+      if (typeof autoFriendMoment === 'function') autoFriendMoment();
+      setTimeout(function(){ if (typeof autoFriendLike === 'function') autoFriendLike(); }, 300);
+      setTimeout(function(){ if (typeof autoFriendComment === 'function') autoFriendComment(); }, 600);
+      showToast('已手动触发');
+    };
+    top.appendChild(b);
+  }, 1000);
+  console.log('✅ v19 已加载');
+})();
