@@ -1024,3 +1024,46 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   setInterval(() => { bindList(); patchButtons(); }, 400);
   console.log('✅ 多选点击修复 v3 已加载');
 })();
+// ====== 多选状态自愈 v4 ======
+(function() {
+  let lastCount = -1;
+
+  setInterval(() => {
+    const cardsPage = document.getElementById('cards');
+    if (!cardsPage) { lastCount = -1; return; }
+    const isMulti = cardsPage.classList.contains('multi-mode');
+    if (!isMulti) { lastCount = -1; return; }
+
+    const list = document.getElementById('cardsList');
+    if (!list) return;
+    const items = list.querySelectorAll('.cardItem');
+
+    let needReapply = false;
+    if (items.length !== lastCount) {
+      needReapply = true;
+    } else {
+      for (const item of items) {
+        if (!item.classList.contains('multiSelect') || !item.querySelector('.multiCheck')) {
+          needReapply = true;
+          break;
+        }
+      }
+    }
+
+    if (needReapply) {
+      items.forEach(item => {
+        item.classList.add('multiSelect');
+        if (!item.querySelector('.multiCheck')) {
+          const check = document.createElement('div');
+          check.className = 'multiCheck';
+          check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"></path></svg>';
+          item.insertBefore(check, item.firstChild);
+        }
+      });
+      lastCount = items.length;
+      console.log('🔄 多选状态已自动重新应用');
+    }
+  }, 500);
+
+  console.log('✅ 多选状态自愈 v4 已加载');
+})();
