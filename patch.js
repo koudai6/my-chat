@@ -864,3 +864,79 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   }
   setTimeout(init, 2000);
 })();
+// ====== v15：朋友圈互动频率改分钟（改 onclick 属性版） ======
+(function(){
+  if (window.__v15) return;
+  window.__v15 = true;
+
+  function mig(){
+    const c = state && state.chatSettings;
+    if (!c) return;
+    if (c.momentPostMax && c.momentPostMax < 60){
+      c.momentPostMax = c.momentPostMax * 60;
+      c.momentLikeMax = (c.momentLikeMax || 1) * 60;
+      c.momentCommentMax = (c.momentCommentMax || 1) * 60;
+      c.momentReplyMax = (c.momentReplyMax || 1) * 60;
+      save();
+    }
+  }
+
+  window.__v15Show = function(){
+    const c = state.chatSettings;
+    function f(id, label, val){
+      return '<div class="field"><label>' + label + '</label><input id="' + id + '" class="textinput" type="number" min="1" value="' + val + '"></div>';
+    }
+    modal('朋友圈互动 · 分钟',
+      '<div class="desc" style="margin-bottom:12px;line-height:1.6">每项都按分钟设置。</div>' +
+      '<div style="font-weight:600;margin:6px 0">对方发朋友圈</div>' +
+      f('mpMin','最短（分钟）', c.momentPostMin) +
+      f('mpMax','最长（分钟）', c.momentPostMax) +
+      '<div style="font-weight:600;margin:14px 0 6px">对方点赞</div>' +
+      f('mlMin','最短（分钟）', c.momentLikeMin) +
+      f('mlMax','最长（分钟）', c.momentLikeMax) +
+      '<div style="font-weight:600;margin:14px 0 6px">对方评论</div>' +
+      f('mcMin','最短（分钟）', c.momentCommentMin) +
+      f('mcMax','最长（分钟）', c.momentCommentMax) +
+      '<div style="font-weight:600;margin:14px 0 6px">对方回复我的评论</div>' +
+      f('mrMin','最短（分钟）', c.momentReplyMin) +
+      f('mrMax','最长（分钟）', c.momentReplyMax) +
+      '<div style="display:flex;gap:8px;margin-top:16px">' +
+      '<button class="action secondary" style="flex:1;margin:0" onclick="closeModal()">取消</button>' +
+      '<button class="action" style="flex:1;margin:0" onclick="window.__v15Save()">保存</button>' +
+      '</div>'
+    );
+  };
+
+  window.__v15Save = function(){
+    const c = state.chatSettings;
+    function v(id){ const el = document.getElementById(id); return Math.max(1, Number(el ? el.value : 1) || 1); }
+    let a, b;
+    a = v('mpMin'); b = v('mpMax'); if (b < a) b = a; c.momentPostMin = a; c.momentPostMax = b;
+    a = v('mlMin'); b = v('mlMax'); if (b < a) b = a; c.momentLikeMin = a; c.momentLikeMax = b;
+    a = v('mcMin'); b = v('mcMax'); if (b < a) b = a; c.momentCommentMin = a; c.momentCommentMax = b;
+    a = v('mrMin'); b = v('mrMax'); if (b < a) b = a; c.momentReplyMin = a; c.momentReplyMax = b;
+    save();
+    const d = document.getElementById('momentInteractionDesc');
+    if (d) d.textContent = '发动态 ' + c.momentPostMin + '–' + c.momentPostMax + '分钟 · 点赞 ' + c.momentLikeMin + '–' + c.momentLikeMax + '分钟 · 评论 ' + c.momentCommentMin + '–' + c.momentCommentMax + '分钟 · 回复 ' + c.momentReplyMin + '–' + c.momentReplyMax + '分钟';
+    closeModal();
+    showToast('已保存（分钟）');
+  };
+
+  // 关键：直接改 onclick 属性
+  setInterval(function(){
+    document.querySelectorAll('[onclick*="showMomentInteractionSettings"]').forEach(function(el){
+      el.setAttribute('onclick', 'window.__v15Show()');
+    });
+  }, 500);
+
+  setTimeout(function(){
+    mig();
+    if (state && state.chatSettings) {
+      const c = state.chatSettings;
+      const d = document.getElementById('momentInteractionDesc');
+      if (d) d.textContent = '发动态 ' + c.momentPostMin + '–' + c.momentPostMax + '分钟 · 点赞 ' + c.momentLikeMin + '–' + c.momentLikeMax + '分钟 · 评论 ' + c.momentCommentMin + '–' + c.momentCommentMax + '分钟 · 回复 ' + c.momentReplyMin + '–' + c.momentReplyMax + '分钟';
+    }
+  }, 2000);
+
+  console.log('✅ v15 已加载');
+})();
