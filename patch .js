@@ -1151,3 +1151,30 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     }
   }, 400);
 })();
+// ====== 朋友圈触发按钮 ======
+(function(){
+  if (window.__momBtn) return;
+  window.__momBtn = true;
+
+  setInterval(function(){
+    const top = document.querySelector('#moments .momActionsTop');
+    if (!top) return;
+
+    // 清理多余的
+    const all = top.querySelectorAll('.momTestBtn');
+    for (let i = 1; i < all.length; i++) all[i].remove();
+    if (top.querySelector('.momTestBtn')) return;
+
+    const b = document.createElement('button');
+    b.className = 'momMore momTestBtn';
+    b.setAttribute('aria-label', '触发朋友圈互动');
+    b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;display:block"><path d="M21 12a9 9 0 1 1-3-6.7"></path><path d="M21 4v5h-5"></path></svg>';
+    b.onclick = function(){
+      if (typeof autoFriendMoment === 'function') autoFriendMoment();
+      setTimeout(function(){ if (typeof autoFriendLike === 'function') autoFriendLike(); }, 300);
+      setTimeout(function(){ if (typeof autoFriendComment === 'function') autoFriendComment(); }, 600);
+      if (typeof showToast === 'function') showToast('已触发');
+    };
+    top.appendChild(b);
+  }, 800);
+})();
