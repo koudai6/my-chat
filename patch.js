@@ -850,3 +850,20 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     console.log('✅ 字卡库多选模式 v2 已加载');
   }, 2500);
 })();
+// ====== 多选栏位置修正（防止被底部导航挡住） ======
+(function() {
+  function fixBar() {
+    const bar = document.getElementById('multiBar');
+    if (bar && bar.parentElement !== document.body) {
+      document.body.appendChild(bar);
+    }
+    if (bar) {
+      bar.style.setProperty('z-index', '99999', 'important');
+      bar.style.setProperty('padding-bottom', 'calc(18px + env(safe-area-inset-bottom))', 'important');
+      bar.style.setProperty('min-height', '64px', 'important');
+    }
+  }
+  // 每 300 毫秒检查一次，一旦多选栏出现就把它挪到 body 上
+  setInterval(fixBar, 300);
+  console.log('✅ 多选栏位置修正已加载');
+})();
