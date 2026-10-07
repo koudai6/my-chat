@@ -1228,3 +1228,74 @@ console.log('✅ patch.js 精简版已加载');
   attachBubblesPatch();
   setInterval(attachBubblesPatch, 2000);
 })();
+// ====== v29：撤销 v28 + 事件委托优化 ======
+(function(){
+  if (window.__v29) return;
+  window.__v29 = true;
+
+  // 1. 撤销 v28 对 innerHTML 的拦截
+  function restore() {
+    const b = document.getElementById('bubbles');
+    if (!b) return;
+    if (Object.getOwnPropertyDescriptor(b, 'innerHTML')) {
+      try { delete b.innerHTML; } catch(e){}
+    }
+  }
+  restore();
+  setInterval(restore, 1000);
+
+  // 2. 清除气泡上的 onclick/oncontextmenu
+  function unbind() {
+    const b = document.getElementById('bubbles');
+    if (!b) return;
+    b.querySelectorAll('.bubble[data-idx]').forEach(function(el){
+      if (el.onclick) el.onclick = null;
+      if (el.oncontextmenu) el.oncontextmenu = null;
+    });
+  }
+  unbind();
+
+  // 用 MutationObserver 在 DOM 变化后立即清理
+  function attachObs() {
+    const b = document.getElementById('bubbles');
+    if (!b || b._unbindObs) return;
+    b._unbindObs = true;
+    const obs = new MutationObserver(function(){ unbind(); });
+    obs.observe(b, {childList: true});
+  }
+  attachObs();
+  setInterval(attachObs, 2000);
+
+  // 3. 事件委托：气泡点击
+  document.addEventListener('click', function(e) {
+    const bubble = e.target.closest('#bubbles .bubble[data-idx]');
+    if (!bubble) return;
+    const cp = document.getElementById('chat');
+    if (!cp || !cp.classList.contains('active')) return;
+    if (typeof currentFriend === 'undefined' || !currentFriend) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    const idx = +bubble.getAttribute('data-idx');
+    if (isNaN(idx)) return;
+    if (typeof showMsgActions === 'function') showMsgActions(idx);
+  }, true);
+
+  // 4. 长按
+  let pt = null;
+  document.addEventListener('touchstart', function(e) {
+    const bubble = e.target.closest('#bubbles .bubble[data-idx]');
+    if (!bubble) return;
+    clearTimeout(pt);
+    pt = setTimeout(function(){
+      if (typeof currentFriend === 'undefined' || !currentFriend) return;
+      const idx = +bubble.getAttribute('data-idx');
+      if (isNaN(idx)) return;
+      if (typeof showMsgActions === 'function') showMsgActions(idx);
+    }, 600);
+  }, {passive: true, capture: true});
+  document.addEventListener('touchend', function(){ clearTimeout(pt); }, true);
+  document.addEventListener('touchmove', function(){ clearTimeout(pt); }, true);
+
+  console.log('✅ v29 已加载');
+})();
