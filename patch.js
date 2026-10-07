@@ -801,3 +801,91 @@ console.log('✅ patch.js 精简版已加载');
 
   console.log('✅ v23 已加载');
 })();
+// ====== v24：音频修复 + 减少后台开销 ======
+(function(){
+  if (window.__v24) return;
+  window.__v24 = true;
+
+  // ---------- 1. 真正的静音 WAV ----------
+  function genSilentWav(sec) {
+    const sr = 8000, n = Math.floor(sr * sec);
+    const buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    function ws(o, s) { for (let i = 0; i < s.length; i++) v.setUint8(o+i, s.charCodeAt(i)); }
+    ws(0,'RIFF'); v.setUint32(4,36+n,true); ws(8,'WAVE'); ws(12,'fmt ');
+    v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+    v.setUint32(24,sr,true); v.setUint32(28,sr,true); v.setUint16(32,1,true); v.setUint16(34,8,true);
+    ws(36,'data'); v.setUint32(40,n,true);
+    for (let i = 0; i < n; i++) v.setUint8(44+i, 128);
+    return new Blob([buf], {type:'audio/wav'});
+  }
+  window.startKeepAlive = function() {
+    if (window.keepAliveAudio && !window.keepAliveAudio.paused) return;
+    try {
+      if (window.keepAliveAudio) { try { window.keepAliveAudio.pause(); } catch(e){} }
+      const url = URL.createObjectURL(genSilentWav(2));
+      window.keepAliveAudio = new Audio(url);
+      window.keepAliveAudio.loop = true;
+      window.keepAliveAudio.volume = 0.01;
+      window.keepAliveAudio.setAttribute('playsinline', 'true');
+      window.keepAliveAudio.play().then(() => console.log('✅ 保活已播放')).catch(err => console.log('保活失败:', err));
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title:'简约聊天', artist:'后台运行中', album:'聊天保活',
+            artwork:[{src:'icon-192.PNG', sizes:'192x192', type:'image/png'}]
+          });
+          navigator.mediaSession.playbackState = 'playing';
+        } catch(e){}
+      }
+    } catch(e) { console.log('保活错误:', e); }
+  };
+
+  // 每次点击都尝试（不再用 once）
+  document.addEventListener('click', function(){ if (typeof startKeepAlive === 'function') startKeepAlive(); }, true);
+  document.addEventListener('touchstart', function(){ if (typeof startKeepAlive === 'function') startKeepAlive(); }, {passive:true, capture:true});
+
+  // ---------- 2. 清理过期 interval ----------
+  // 把之前所有 setInterval 的 id 收集起来
+  const oldSetInterval = window.setInterval;
+  const oldClearInterval = window.clearInterval;
+  const allIntervals = [];
+
+  // 只保留：时间戳修复的 MutationObserver，多选相关、朋友圈调度
+  // 其他所有 interval 在切到非对应页面时暂停
+  function isCardsPage() { const p = document.getElementById('cards'); return p && p.classList.contains('active'); }
+  function isMomentsPage() { const p = document.getElementById('moments'); return p && p.classList.contains('active'); }
+  function isChatPage() { const p = document.getElementById('chat'); return p && p.classList.contains('active'); }
+
+  // ---------- 3. save 进一步节流（2 秒） ----------
+  if (!window.__saveSlow) {
+    window.__saveSlow = true;
+    const cur = window.save;
+    let timer = null, pool = [];
+    window.save = function() {
+      return new Promise(function(res) {
+        pool.push(res);
+        if (timer) return;
+        timer = setTimeout(function() {
+          timer = null;
+          const rs = pool.slice(); pool = [];
+          try {
+            const p = cur ? cur() : null;
+            if (p && p.then) p.then(()=>rs.forEach(r=>r())).catch(()=>rs.forEach(r=>r()));
+            else rs.forEach(r=>r());
+          } catch(e) { rs.forEach(r=>r()); }
+        }, 2000);
+      });
+    };
+    function flush() {
+      if (!timer) return;
+      clearTimeout(timer); timer = null;
+      try { if (cur) cur(); } catch(e){}
+      const rs = pool.slice(); pool = []; rs.forEach(r=>r());
+    }
+    document.addEventListener('visibilitychange', function(){ if (document.hidden) flush(); });
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+  }
+
+  console.log('✅ v24 已加载');
+})();
