@@ -364,3 +364,66 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     console.log('✅ 时间显示修复补丁已加载');
   }, 2000);
 })();
+// ====== 强化版后台保活（控制中心媒体卡片） ======
+(function() {
+  // 覆盖原有的 startKeepAlive
+  window.startKeepAlive = function() {
+    if (window.keepAliveAudio && !window.keepAliveAudio.paused) return;
+
+    // 用一段 1 秒左右的静音 WAV（比之前的稍长，避免 iOS 判为瞬时音频）
+    const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+    window.keepAliveAudio = new Audio(SILENT_WAV);
+    window.keepAliveAudio.loop = true;
+    // 关键：音量不能是 0，iOS 会认为没有播放；也不能大，吵人。0.01 刚刚好
+    window.keepAliveAudio.volume = 0.01;
+    window.keepAliveAudio.setAttribute('playsinline', 'true');
+
+    window.keepAliveAudio.play().then(() => {
+      console.log('✅ 静音保活已启动');
+    }).catch(e => console.log('保活启动失败:', e));
+
+    // 设置完整的 Media Session，让锁屏/控制中心显示卡片
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: '简约聊天',
+          artist: '后台运行中',
+          album: '聊天保活',
+          artwork: [
+            { src: 'icon-192.PNG', sizes: '192x192', type: 'image/png' },
+            { src: 'icon-192.PNG', sizes: '512x512', type: 'image/png' }
+          ]
+        });
+
+        navigator.mediaSession.playbackState = 'playing';
+
+        navigator.mediaSession.setActionHandler('play', () => {
+          if (window.keepAliveAudio) window.keepAliveAudio.play();
+          navigator.mediaSession.playbackState = 'playing';
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          if (window.keepAliveAudio) window.keepAliveAudio.pause();
+          navigator.mediaSession.playbackState = 'paused';
+        });
+        navigator.mediaSession.setActionHandler('seekbackward', () => {});
+        navigator.mediaSession.setActionHandler('seekforward', () => {});
+      } catch (e) {
+        console.log('MediaSession 设置失败:', e);
+      }
+    }
+
+    // 再发一条欢迎通知，确认通知权限真的生效了
+    setTimeout(() => {
+      if (Notification.permission === 'granted' && navigator.serviceWorker && navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(reg => {
+          reg.showNotification('简约聊天', {
+            body: '后台保活已开启，你现在可以在后台收到消息提醒了',
+            icon: 'icon-192.PNG',
+            tag: 'keepalive-welcome'
+          });
+        }).catch(()=>{});
+      }
+    }, 500);
+  };
+})();
