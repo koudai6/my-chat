@@ -427,3 +427,126 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     }, 500);
   };
 })();
+// ====== 升级版“后台消息推送”卡片 ======
+(function() {
+  function buildCard() {
+    const mePage = document.getElementById('me');
+    if (!mePage) { setTimeout(buildCard, 500); return; }
+
+    // 移除旧版卡片（如果有）
+    const oldBtn = document.getElementById('notifyBtn');
+    if (oldBtn) {
+      const oldCard = oldBtn.closest('.section.card');
+      if (oldCard) oldCard.remove();
+    }
+
+    const card = document.createElement('div');
+    card.className = 'section card';
+    card.id = 'pushCard';
+
+    const granted = (typeof Notification !== 'undefined' && Notification.permission === 'granted');
+    const statusText = granted
+      ? '后台消息推送✅ 已开启 — 当页面在后台时，收到消息会弹出系统通知'
+      : '后台消息推送 — 点击右侧开关，允许系统通知';
+
+    card.innerHTML = `
+      <div class="row" style="align-items:flex-start;padding:14px 13px;gap:10px">
+        <div class="icon settingsIcon iconSvg" style="background:#e9e9ec!important;color:#333!important">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 17h12l-1.4-1.8V10a4.6 4.6 0 0 0-9.2 0v5.2L6 17Z"></path>
+            <path d="M10 20h4"></path>
+          </svg>
+        </div>
+        <div class="rowmain" id="pushCardText" style="cursor:pointer;line-height:1.5">
+          <div class="title" style="font-size:.92rem">${statusText}</div>
+          <div class="desc" style="margin-top:4px">点击文字区域可发送一条测试通知</div>
+        </div>
+        <button class="switch ${granted ? 'on' : ''}" id="pushSwitch"><i></i></button>
+      </div>
+    `;
+
+    // 插到设置卡片上面
+    const settingsCard = mePage.querySelector('.section.card');
+    if (settingsCard && settingsCard.nextSibling) {
+      mePage.insertBefore(card, settingsCard.nextSibling);
+    } else {
+      mePage.appendChild(card);
+    }
+
+    // —— 开关逻辑 ——
+    const sw = card.querySelector('#pushSwitch');
+    const textEl = card.querySelector('#pushCardText');
+
+    function updateCard() {
+      const ok = (Notification.permission === 'granted');
+      sw.classList.toggle('on', ok);
+      textEl.querySelector('.title').textContent = ok
+        ? '后台消息推送✅ 已开启 — 当页面在后台时，收到消息会弹出系统通知'
+        : '后台消息推送 — 点击右侧开关，允许系统通知';
+    }
+
+    function sendTestNotification() {
+      if (Notification.permission !== 'granted') {
+        alert('请先开启右侧开关，允许系统通知');
+        return;
+      }
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(reg => {
+          reg.showNotification('简约聊天', {
+            body: '这是一条测试通知，说明推送已生效 ✅',
+            icon: 'icon-192.PNG',
+            tag: 'test-notification-' + Date.now()
+          });
+        }).catch(()=>{});
+      } else {
+        new Notification('简约聊天', { body: '这是一条测试通知 ✅' });
+      }
+    }
+
+    sw.onclick = function(e) {
+      e.stopPropagation();
+      if (Notification.permission === 'granted') {
+        // 已经开启 → 提示不支持关闭（iOS 不允许代码撤销通知权限）
+        alert('若想关闭，请前往 iPhone 设置 → 通知 → 简约聊天 中手动关闭');
+        return;
+      }
+      Notification.requestPermission().then(perm => {
+        if (perm === 'granted') {
+          updateCard();
+          if (typeof startKeepAlive === 'function') startKeepAlive();
+          // 立刻发一条测试通知
+          setTimeout(sendTestNotification, 300);
+        } else {
+          alert('你拒绝了通知权限，可在 iPhone 设置中重新开启');
+          updateCard();
+        }
+      });
+    };
+
+    // 点击文字区域 → 发测试通知
+    textEl.onclick = function() {
+      sendTestNotification();
+    };
+  }
+
+  // 应用初始化后延迟构建
+  setTimeout(buildCard, 1500);
+  // 每次从其他页回到“我的”页时刷新状态
+  const origShowPage = window.showPage;
+  window.showPage = function(id) {
+    const r = origShowPage ? origShowPage.apply(this, arguments) : undefined;
+    if (id === 'me') {
+      const card = document.getElementById('pushCard');
+      if (card) {
+        const sw = card.querySelector('#pushSwitch');
+        const title = card.querySelector('.title');
+        const ok = (Notification.permission === 'granted');
+        if (sw) sw.classList.toggle('on', ok);
+        if (title) title.textContent = ok
+          ? '后台消息推送✅ 已开启 — 当页面在后台时，收到消息会弹出系统通知'
+          : '后台消息推送 — 点击右侧开关，允许系统通知';
+      }
+    }
+    return r;
+  };
+})();
