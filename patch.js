@@ -940,3 +940,77 @@ console.log('✅ 性能与回复体验优化补丁已加载');
 
   console.log('✅ v15 已加载');
 })();
+// ====== v16：朋友圈互动独立调度器（分钟单位） ======
+(function(){
+  if (window.__v16) return;
+  window.__v16 = true;
+
+  function mig(){
+    const c = state && state.chatSettings;
+    if (!c) return;
+    if (c.momentPostMax && c.momentPostMax < 60){
+      c.momentPostMax = c.momentPostMax * 60;
+      c.momentLikeMax = (c.momentLikeMax || 1) * 60;
+      c.momentCommentMax = (c.momentCommentMax || 1) * 60;
+      c.momentReplyMax = (c.momentReplyMax || 1) * 60;
+      save();
+    }
+  }
+
+  window.__v16Next = { post: 0, like: 0, comment: 0, reply: 0 };
+
+  function pick(min, max){
+    min = Math.max(1, Number(min) || 1);
+    max = Math.max(min, Number(max) || min);
+    return (min + Math.random() * (max - min)) * 60000;
+  }
+  function sched(key, min, max){
+    window.__v16Next[key] = Date.now() + pick(min, max);
+  }
+  function ensure(){
+    const c = state.chatSettings;
+    if (!window.__v16Next.post) sched('post', c.momentPostMin, c.momentPostMax);
+    if (!window.__v16Next.like) sched('like', c.momentLikeMin, c.momentLikeMax);
+    if (!window.__v16Next.comment) sched('comment', c.momentCommentMin, c.momentCommentMax);
+    if (!window.__v16Next.reply) sched('reply', c.momentReplyMin, c.momentReplyMax);
+  }
+
+  // 每 20 秒扫一次，到点触发
+  setInterval(function(){
+    if (!state || !state.chatSettings) return;
+    ensure();
+    const c = state.chatSettings;
+    const now = Date.now();
+    if (now >= window.__v16Next.post){
+      if (typeof autoFriendMoment === 'function') autoFriendMoment();
+      sched('post', c.momentPostMin, c.momentPostMax);
+    }
+    if (now >= window.__v16Next.like){
+      if (typeof autoFriendLike === 'function') autoFriendLike();
+      sched('like', c.momentLikeMin, c.momentLikeMax);
+    }
+    if (now >= window.__v16Next.comment){
+      if (typeof autoFriendComment === 'function') autoFriendComment();
+      sched('comment', c.momentCommentMin, c.momentCommentMax);
+    }
+    if (now >= window.__v16Next.reply){
+      if (typeof autoFriendReply === 'function') autoFriendReply();
+      sched('reply', c.momentReplyMin, c.momentReplyMax);
+    }
+  }, 20000);
+
+  // 设置保存后重新调度
+  window.__v16Reschedule = function(){
+    sched('post', state.chatSettings.momentPostMin, state.chatSettings.momentPostMax);
+    sched('like', state.chatSettings.momentLikeMin, state.chatSettings.momentLikeMax);
+    sched('comment', state.chatSettings.momentCommentMin, state.chatSettings.momentCommentMax);
+    sched('reply', state.chatSettings.momentReplyMin, state.chatSettings.momentReplyMax);
+    showToast('朋友圈调度已重置');
+  };
+
+  setTimeout(function(){
+    mig();
+    ensure();
+    console.log('✅ v16 朋友圈独立调度器已启动');
+  }, 2000);
+})();
