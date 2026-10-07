@@ -132,3 +132,84 @@ window.importCardsJson = function() {
 };
 
 console.log('✅ 字卡导入补丁已加载');
+// ====== 性能与回复体验优化补丁 ======
+
+// 1. 优化开聊天时的性能：先渲染气泡，再异步检查字卡状态
+const origOpenChat = window.openChat;
+window.openChat = function(id) {
+  // 先快速渲染，让界面立即响应
+  currentFriend = state.friends.find(f=>f.id===id)||state.friends[0];
+  if(!currentFriend){showToast('没有好友');return;}
+  if(!Array.isArray(currentFriend.chat)) currentFriend.chat=[];
+  currentFriend.unread=0;
+
+  $('chatName').textContent = currentFriend.name;
+  $('chatId').textContent = 'ID：' + currentFriend.uid;
+  let ca = $('chatAvatar');
+  if (isImgAvatar(currentFriend.avatar)) {
+    ca.innerHTML = `<img src="${currentFriend.avatar}" alt="">`;
+  } else {
+    ca.textContent = (currentFriend.avatar || currentFriend.name || '?').toString().charAt(0);
+  }
+
+  // 只渲染气泡，先不检查字卡冷却/分组
+  renderBubbles();
+  applyChatBg();
+  applyDecorationToChat();
+  showPage('chat');
+
+  // 把保存放到空闲时间执行，不阻塞界面
+  if (window.requestIdleCallback) {
+    requestIdleCallback(()=>save());
+  } else {
+    setTimeout(()=>save(), 100);
+  }
+};
+
+// 2. 让“我发消息后”对方立即显示正在输入，再按时弹出字卡
+window.sendMsg = function() {
+  let i = $('msgInput'), t = i.value.trim();
+  if(!t || !currentFriend) return;
+
+  let msg = { who:'me', text:t, time:now() };
+  if(window._pendingQuote){ msg.quote = window._pendingQuote; clearPendingQuote(); }
+  currentFriend.chat.push(msg);
+  i.value = '';
+  save();
+  renderBubbles();
+
+  // —— 关键改动：立即显示对方“正在输入…”动画 ——
+  const friend = currentFriend;
+  clearTimeout(friend._cardTimer);
+  clearTimeout(friend._typingTimer);
+
+  // 先标记“正在输入”，立刻渲染出打字动画
+  friend._typing = true;
+  if(friend === currentFriend) renderBubbles();
+
+  // 按设置的延迟时间后弹出字卡
+  let cs = state.chatSettings || {};
+  let min = Math.max(1, +cs.min || 30);
+  let max = Math.max(min, +cs.max || 120);
+  let delay = (min + Math.random() * (max - min)) * 1000;
+
+  friend._typingTimer = setTimeout(() => {
+    friend._typing = false;
+    if(friend === currentFriend) renderBubbles();
+    // 走字卡随机弹出逻辑
+    if (typeof runCardPopup === 'function') {
+      runCardPopup(friend);
+    }
+  }, delay);
+};
+
+// 覆盖主动发送调度器（避免两个调度器同时跑）
+if (typeof startActiveSendScheduler === 'function') {
+  const origStartActive = window.startActiveSendScheduler;
+  window.startActiveSendScheduler = function() {
+    // 不改动原逻辑
+    origStartActive();
+  };
+}
+
+console.log('✅ 性能与回复体验优化补丁已加载');
