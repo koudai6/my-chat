@@ -1066,3 +1066,123 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     top.appendChild(b);
   }, 800);
 })();
+// ====== 头像点击 + 性能优化 ======
+(function(){
+
+  // ========== Part 1: 点聊天页顶部头像 → 触发对方回复 ==========
+  if (!window.__tapAvatar) {
+    window.__tapAvatar = true;
+    let lastTap = 0;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      .chatTopAvatar.tapped { animation: avatarTap 0.35s ease; }
+      @keyframes avatarTap {
+        0% { transform: scale(1); }
+        40% { transform: scale(0.82); }
+        100% { transform: scale(1); }
+      }
+    `;
+    document.head.appendChild(style);
+
+    document.addEventListener('click', function(e){
+      const av = e.target.closest('#chat .chatTopAvatar');
+      if (!av) return;
+      const chatPage = document.getElementById('chat');
+      if (!chatPage || !chatPage.classList.contains('active')) return;
+      if (typeof currentFriend === 'undefined' || !currentFriend) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const now = Date.now();
+      if (now - lastTap < 2000) {
+        if (typeof showToast === 'function') showToast('稍等一下再点');
+        return;
+      }
+      lastTap = now;
+
+      if (navigator.vibrate) { try { navigator.vibrate(30); } catch(err) {} }
+
+      av.classList.remove('tapped');
+      void av.offsetWidth;
+      av.classList.add('tapped');
+
+      const activeCards = state.cards.filter(c => {
+        if (c.enabled === false) return false;
+        if (c.probability === undefined || c.probability <= 0) return false;
+        const g = state.groups.find(x => x.id === c.group);
+        if (!g || g.enabled === false) return false;
+        return true;
+      });
+      if (!activeCards.length) {
+        if (typeof showToast === 'function') showToast('字卡库里没有可用的字卡');
+        return;
+      }
+
+      clearTimeout(currentFriend._cardTimer);
+      clearTimeout(currentFriend._typingTimer);
+
+      if (typeof runCardPopup === 'function') {
+        try { runCardPopup(currentFriend); } catch (err) { console.log('触发失败:', err); }
+      }
+    }, true);
+
+    console.log('✅ 点头像触发回复已加载');
+  }
+
+  // ========== Part 2: save 节流（发消息不卡） ==========
+  if (!window.__saveThrottle) {
+    window.__saveThrottle = true;
+    const origSave = window.save;
+    let saveTimer = null;
+    let pendingResolvers = [];
+
+    // 多次调用合并成一次写盘（600ms 内）
+    window.save = function() {
+      return new Promise(function(resolve) {
+        pendingResolvers.push(resolve);
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(function() {
+          const resolvers = pendingResolvers.slice();
+          pendingResolvers = [];
+          try {
+            if (typeof origSave === 'function') {
+              const p = origSave();
+              if (p && p.then) {
+                p.then(function(){ resolvers.forEach(function(r){ r(); }); })
+                 .catch(function(){ resolvers.forEach(function(r){ r(); }); });
+              } else {
+                resolvers.forEach(function(r){ r(); });
+              }
+            } else {
+              resolvers.forEach(function(r){ r(); });
+            }
+          } catch(err) {
+            resolvers.forEach(function(r){ r(); });
+          }
+        }, 600);
+      });
+    };
+
+    // 切到后台 / 关页面时，立即写盘（防止数据丢失）
+    function flushSave() {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        if (typeof origSave === 'function') { try { origSave(); } catch(err) {} }
+        const resolvers = pendingResolvers.slice();
+        pendingResolvers = [];
+        resolvers.forEach(function(r){ r(); });
+      }
+    }
+    document.addEventListener('visibilitychange', function() {
+      if (document.hidden) flushSave();
+    });
+    window.addEventListener('pagehide', flushSave);
+    window.addEventListener('beforeunload', flushSave);
+
+    console.log('✅ save 节流已启用');
+  }
+
+})();
