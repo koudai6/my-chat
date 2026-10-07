@@ -246,3 +246,121 @@ console.log('✅ 性能与回复体验优化补丁已加载');
   document.head.appendChild(style);
   console.log('✅ 锁定横向滑动补丁已加载');
 })();
+// ====== 后台消息通知监听器 ======
+(function() {
+  // 记录每个好友"已通知过"的最后一条消息
+  const notifiedKeys = {};
+
+  // 初始化：先把当前所有好友的最后一条消息标记为"已通知"，避免历史消息炸屏
+  function initSeen() {
+    (state.friends || []).forEach(f => {
+      if (!Array.isArray(f.chat) || !f.chat.length) return;
+      const last = f.chat[f.chat.length - 1];
+      if (!last) return;
+      notifiedKeys[f.id] = (last.text || '') + '|' + last.time + '|' + (last.image ? 'img' : '');
+    });
+  }
+
+  // 每 3 秒扫一次
+  function scan() {
+    if (!Array.isArray(state.friends)) return;
+    state.friends.forEach(f => {
+      if (!Array.isArray(f.chat) || !f.chat.length) return;
+      const last = f.chat[f.chat.length - 1];
+      if (!last || last.who !== 'other') return;
+
+      const key = (last.text || '') + '|' + last.time + '|' + (last.image ? 'img' : '');
+      if (notifiedKeys[f.id] === key) return;
+      notifiedKeys[f.id] = key;
+
+      // 判断是否需要弹通知：
+      // 1. 页面在后台（document.hidden）
+      // 2. 或者当前不在这个好友的聊天页
+      const isViewingThis = (typeof currentFriend !== 'undefined' && currentFriend && currentFriend.id === f.id && !document.hidden);
+      if (isViewingThis) return;
+
+      // 发通知
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        const title = f.name || '新消息';
+        let body = last.text || '';
+        if (last.image && !body) body = '[图片/表情包]';
+        if (typeof showNotification === 'function') {
+          showNotification(title, body);
+        } else if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification(title, {
+              body: body,
+              icon: 'icon-192.PNG',
+              tag: 'chat-' + f.id
+            });
+          }).catch(()=>{});
+        }
+      }
+    });
+  }
+
+  // 等应用初始化完成后再开始扫描
+  setTimeout(() => {
+    initSeen();
+    setInterval(scan, 3000);
+    console.log('✅ 后台消息通知监听器已启动');
+  }, 2000);
+})();
+// ====== 时间显示修复补丁 ======
+(function() {
+  function formatTs(str) {
+    if (!str) return str;
+    const s = String(str).trim();
+    if (!/^\d+$/.test(s)) return str; // 不是纯数字，原样返回
+    let num = Number(s);
+    if (isNaN(num)) return str;
+
+    let ms;
+    if (s.length >= 12) ms = num;         // 13位毫秒时间戳
+    else if (s.length >= 9) ms = num * 1000; // 10位秒时间戳
+    else return str;
+
+    const d = new Date(ms);
+    if (isNaN(d.getTime())) return str;
+    const y = d.getFullYear();
+    if (y < 2000 || y > 2100) return str;
+
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    const now = new Date();
+    // 今天显示 HH:MM
+    if (d.toDateString() === now.toDateString()) return hh + ':' + mi;
+    // 昨天
+    const yest = new Date(now);
+    yest.setDate(now.getDate() - 1);
+    if (d.toDateString() === yest.toDateString()) return '昨天';
+    // 其他显示 月/日
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return mm + '/' + dd;
+  }
+
+  function fixTimeDisplay() {
+    document.querySelectorAll('#chatList .value').forEach(el => {
+      const t = el.textContent.trim();
+      const f = formatTs(t);
+      if (f !== t) el.textContent = f;
+    });
+    document.querySelectorAll('#bubbles .bubbleMeta').forEach(el => {
+      const t = el.textContent.trim();
+      const f = formatTs(t);
+      if (f !== t) el.textContent = f;
+    });
+  }
+
+  const observer = new MutationObserver(fixTimeDisplay);
+
+  setTimeout(() => {
+    const chatList = document.getElementById('chatList');
+    const bubbles = document.getElementById('bubbles');
+    if (chatList) observer.observe(chatList, { childList: true, subtree: true, characterData: true });
+    if (bubbles) observer.observe(bubbles, { childList: true, subtree: true, characterData: true });
+    fixTimeDisplay();
+    console.log('✅ 时间显示修复补丁已加载');
+  }, 2000);
+})();
