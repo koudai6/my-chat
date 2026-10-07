@@ -550,33 +550,31 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     return r;
   };
 })();
-// ====== 字卡库多选模式 ======
+  // ====== 字卡库多选模式 v2 ======
 (function() {
   let multiMode = false;
   const selectedIds = new Set();
 
-  // 样式
   const styleEl = document.createElement('style');
   styleEl.textContent = `
-    .multi-select-btn{width:auto!important;height:38px!important;border-radius:19px!important;padding:0 16px!important;font-size:.82rem!important;font-weight:600!important;background:#f0f0f4!important;color:#1a1a1e!important;display:grid;place-items:center;box-shadow:none!important;margin-right:8px;font-family:inherit}
+    .multi-select-btn{width:auto!important;height:38px!important;border-radius:19px!important;padding:0 16px!important;font-size:.82rem!important;font-weight:600!important;background:#f0f0f4!important;color:#1a1a1e!important;display:grid;place-items:center;box-shadow:none!important;margin-right:8px;font-family:inherit;cursor:pointer}
     #cards.multi-mode .header .plus:not(.multi-select-btn){display:none!important}
-    #cards.multi-mode #cardsList{padding-bottom:96px}
-    .cardItem.multiSelect{padding-left:46px!important;position:relative}
-    .cardItem.multiSelect .multiCheck{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;border:1.5px solid #c7c7cc;display:grid;place-items:center;background:#fff;flex:none;transition:.15s}
+    #cards.multi-mode #cardsList{padding-bottom:100px}
+    .cardItem.multiSelect{padding-left:48px!important;position:relative;cursor:pointer}
+    .cardItem.multiSelect .multiCheck{position:absolute;left:15px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;border:1.5px solid #c7c7cc;display:grid;place-items:center;background:#fff;flex:none;transition:.15s;pointer-events:none}
     .cardItem.multiSelect .multiCheck.checked{background:#1a1a1e;border-color:#1a1a1e;color:#fff}
     .cardItem.multiSelect .multiCheck svg{width:13px;height:13px;display:none}
     .cardItem.multiSelect .multiCheck.checked svg{display:block}
     .cardItem.multiSelect .switch,
     .cardItem.multiSelect .cardTools{display:none!important}
-    .multi-bar{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,720px);background:#1a1a1e;color:#fff;display:flex;justify-content:space-around;align-items:center;padding:10px 8px calc(10px + env(safe-area-inset-bottom));z-index:80;box-shadow:0 -4px 20px rgba(0,0,0,.18);border-radius:20px 20px 0 0}
-    .multi-bar button{color:#fff;font-size:.72rem;padding:6px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;background:transparent;border:0;cursor:pointer;min-width:0;font-family:inherit}
+    .multi-bar{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,720px);background:#1a1a1e;color:#fff;display:flex;justify-content:space-around;align-items:center;padding:10px 8px calc(10px + env(safe-area-inset-bottom));z-index:80;box-shadow:0 -4px 20px rgba(0,0,0,.18);border-radius:20px 20px 0 0;box-sizing:border-box}
+    .multi-bar button{color:#fff;font-size:.72rem;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;background:transparent;border:0;cursor:pointer;min-width:0;font-family:inherit}
     .multi-bar button:disabled{opacity:.32}
     .multi-bar button svg{width:22px;height:22px;display:block}
     .multi-bar button.danger{color:#ff8a8a}
   `;
   document.head.appendChild(styleEl);
 
-  // 注入"选择"按钮
   function injectSelectButton() {
     const cardsPage = document.getElementById('cards');
     if (!cardsPage) return;
@@ -587,7 +585,7 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     if (!plusBtn) return;
     const btn = document.createElement('button');
     btn.className = 'plus multi-select-btn';
-    btn.textContent = '选择';
+    btn.textContent = multiMode ? '完成' : '选择';
     btn.onclick = toggleMultiMode;
     header.insertBefore(btn, plusBtn);
   }
@@ -596,11 +594,27 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     multiMode = !multiMode;
     selectedIds.clear();
     const cardsPage = document.getElementById('cards');
-    const btn = cardsPage.querySelector('.multi-select-btn');
+    const btn = cardsPage && cardsPage.querySelector('.multi-select-btn');
     if (btn) btn.textContent = multiMode ? '完成' : '选择';
-    cardsPage.classList.toggle('multi-mode', multiMode);
+    if (cardsPage) cardsPage.classList.toggle('multi-mode', multiMode);
     applyMultiState();
     updateBar();
+  }
+
+  function extractIdFromItem(item) {
+    if (item.dataset && item.dataset.multiId) return item.dataset.multiId;
+    const btns = item.querySelectorAll('button[onclick]');
+    for (const b of btns) {
+      const oc = b.getAttribute('onclick') || '';
+      let m = oc.match(/toggleCard\((.+?)\)/);
+      if (!m) m = oc.match(/editCard\((.+?)\)/);
+      if (!m) m = oc.match(/deleteCard\((.+?)\)/);
+      if (m) {
+        try { return String(JSON.parse(m[1])); }
+        catch(e) { return String(m[1]).replace(/^['"]|['"]$/g, ''); }
+      }
+    }
+    return null;
   }
 
   function applyMultiState() {
@@ -610,15 +624,40 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     items.forEach(item => {
       if (multiMode) {
         item.classList.add('multiSelect');
+        const id = extractIdFromItem(item);
+        if (id !== null) item.dataset.multiId = id;
+
         if (!item.querySelector('.multiCheck')) {
           const check = document.createElement('div');
           check.className = 'multiCheck';
           check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"></path></svg>';
           item.insertBefore(check, item.firstChild);
         }
-        const id = extractIdFromItem(item);
-        if (id !== null && selectedIds.has(String(id))) {
+
+        // 用 addEventListener 绑定到 item 本身，避免与原有内联 onclick 冲突
+        if (!item._multiBound) {
+          item._multiBound = true;
+          item.addEventListener('click', function(e) {
+            if (!multiMode) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const sid = this.dataset.multiId;
+            if (!sid) return;
+            if (selectedIds.has(sid)) {
+              selectedIds.delete(sid);
+              this.querySelector('.multiCheck')?.classList.remove('checked');
+            } else {
+              selectedIds.add(sid);
+              this.querySelector('.multiCheck')?.classList.add('checked');
+            }
+            updateBar();
+          }, true); // 用捕获阶段，优先于原 onclick
+        }
+
+        if (selectedIds.has(item.dataset.multiId)) {
           item.querySelector('.multiCheck')?.classList.add('checked');
+        } else {
+          item.querySelector('.multiCheck')?.classList.remove('checked');
         }
       } else {
         item.classList.remove('multiSelect');
@@ -626,22 +665,6 @@ console.log('✅ 性能与回复体验优化补丁已加载');
         if (c) c.remove();
       }
     });
-  }
-
-  function extractIdFromItem(item) {
-    const btns = item.querySelectorAll('button[onclick]');
-    for (const b of btns) {
-      const oc = b.getAttribute('onclick') || '';
-      let m = oc.match(/toggleCard\((.+?)\)/);
-      if (!m) m = oc.match(/editCard\((.+?)\)/);
-      if (!m) m = oc.match(/deleteCard\((.+?)\)/);
-      if (m) {
-        try { return JSON.parse(m[1]); } catch(e) {
-          return m[1].replace(/^['"]|['"]$/g, '');
-        }
-      }
-    }
-    return null;
   }
 
   function updateBar() {
@@ -690,20 +713,18 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     if (!cardsPage) return;
     const items = cardsPage.querySelectorAll('#cardsList .cardItem');
     const allSelected = items.length > 0 && Array.from(items).every(item => {
-      const id = extractIdFromItem(item);
-      return id !== null && selectedIds.has(String(id));
+      const id = item.dataset.multiId;
+      return id && selectedIds.has(id);
     });
     if (allSelected) {
       items.forEach(item => {
-        const id = extractIdFromItem(item);
-        if (id !== null) selectedIds.delete(String(id));
+        if (item.dataset.multiId) selectedIds.delete(item.dataset.multiId);
         item.querySelector('.multiCheck')?.classList.remove('checked');
       });
     } else {
       items.forEach(item => {
-        const id = extractIdFromItem(item);
-        if (id !== null) {
-          selectedIds.add(String(id));
+        if (item.dataset.multiId) {
+          selectedIds.add(item.dataset.multiId);
           item.querySelector('.multiCheck')?.classList.add('checked');
         }
       });
@@ -735,7 +756,7 @@ console.log('✅ 性能与回复体验优化补丁已加载');
       if (typeof showToast === 'function') showToast(`已移动 ${count} 张字卡`);
       selectedIds.clear();
       if (typeof renderCards === 'function') renderCards();
-      setTimeout(() => { applyMultiState(); updateBar(); }, 30);
+      setTimeout(() => { applyMultiState(); updateBar(); }, 50);
     });
   };
 
@@ -743,22 +764,17 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     const name = prompt('新建分组名称：');
     if (!name || !name.trim()) return;
     const trimmed = name.trim();
-    if (state.groups.some(g => String(g.name).trim() === trimmed)) {
-      alert('分组已存在');
-      return;
-    }
+    if (state.groups.some(g => String(g.name).trim() === trimmed)) { alert('分组已存在'); return; }
     const newGid = 'g' + Date.now() + Math.random().toString(36).slice(2, 7);
     state.groups.push({ id: newGid, name: trimmed, enabled: true, probability: 50 });
     const count = selectedIds.size;
-    state.cards.forEach(c => {
-      if (selectedIds.has(String(c.id))) c.group = newGid;
-    });
+    state.cards.forEach(c => { if (selectedIds.has(String(c.id))) c.group = newGid; });
     save().then(() => {
       if (typeof closeModal === 'function') closeModal();
       if (typeof showToast === 'function') showToast(`已新建「${trimmed}」并移动 ${count} 张`);
       selectedIds.clear();
       if (typeof renderCards === 'function') renderCards();
-      setTimeout(() => { applyMultiState(); updateBar(); }, 30);
+      setTimeout(() => { applyMultiState(); updateBar(); }, 50);
     });
   };
 
@@ -772,7 +788,7 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     save().then(() => {
       if (typeof showToast === 'function') showToast(newState ? `已启用 ${cards.length} 张` : `已停用 ${cards.length} 张`);
       if (typeof renderCards === 'function') renderCards();
-      setTimeout(() => { applyMultiState(); updateBar(); }, 30);
+      setTimeout(() => { applyMultiState(); updateBar(); }, 50);
     });
   }
 
@@ -786,33 +802,8 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     save().then(() => {
       if (typeof showToast === 'function') showToast(`已删除 ${removed} 张字卡`);
       if (typeof renderCards === 'function') renderCards();
-      setTimeout(() => { applyMultiState(); updateBar(); }, 30);
+      setTimeout(() => { applyMultiState(); updateBar(); }, 50);
     });
-  }
-
-  // 捕获阶段拦截点击
-  function attachClickInterceptor() {
-    const cardsPage = document.getElementById('cards');
-    if (!cardsPage || cardsPage.dataset.multiBound) return;
-    cardsPage.dataset.multiBound = '1';
-    cardsPage.addEventListener('click', function(e) {
-      if (!multiMode) return;
-      const item = e.target.closest('#cardsList .cardItem');
-      if (!item) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const id = extractIdFromItem(item);
-      if (id === null) return;
-      const sid = String(id);
-      if (selectedIds.has(sid)) {
-        selectedIds.delete(sid);
-        item.querySelector('.multiCheck')?.classList.remove('checked');
-      } else {
-        selectedIds.add(sid);
-        item.querySelector('.multiCheck')?.classList.add('checked');
-      }
-      updateBar();
-    }, true);
   }
 
   function attachObserver() {
@@ -821,8 +812,8 @@ console.log('✅ 性能与回复体验优化补丁已加载');
     list.dataset.multiObserved = '1';
     const obs = new MutationObserver(() => {
       if (!multiMode) return;
-      applyMultiState();
-      updateBar();
+      // 渲染完成后重新绑定
+      setTimeout(() => { applyMultiState(); updateBar(); }, 10);
     });
     obs.observe(list, { childList: true });
   }
@@ -838,17 +829,15 @@ console.log('✅ 性能与回复体验优化补丁已加载');
         const btn = document.querySelector('#cards .multi-select-btn');
         if (btn) btn.textContent = '选择';
         document.getElementById('cards')?.classList.remove('multi-mode');
-        const bar = document.getElementById('multiBar');
-        if (bar) bar.remove();
+        document.getElementById('multiBar')?.remove();
       }
       const r = orig ? orig.apply(this, arguments) : undefined;
       if (id === 'cards') {
         setTimeout(() => {
           injectSelectButton();
-          attachClickInterceptor();
           attachObserver();
           if (multiMode) applyMultiState();
-        }, 60);
+        }, 80);
       }
       return r;
     };
@@ -856,9 +845,8 @@ console.log('✅ 性能与回复体验优化补丁已加载');
 
   setTimeout(() => {
     injectSelectButton();
-    attachClickInterceptor();
     attachObserver();
     hookShowPage();
-    console.log('✅ 字卡库多选模式已加载');
+    console.log('✅ 字卡库多选模式 v2 已加载');
   }, 2500);
 })();
