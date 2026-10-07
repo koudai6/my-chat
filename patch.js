@@ -1011,3 +1011,100 @@ console.log('✅ patch.js 精简版已加载');
   setTimeout(buildCard, 2500);
   console.log('✅ v25 控制中心名字设置已加载');
 })();
+// ====== v26：控制中心名字设置（修复版） ======
+(function(){
+  if (window.__v26) return;
+  window.__v26 = true;
+
+  function getTitle() { return localStorage.getItem('mediaTitle') || 'ievan'; }
+  function getSubtitle() { return localStorage.getItem('mediaSubtitle') || '在线'; }
+
+  window.__updateMediaMeta = function(){
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: getTitle(),
+        artist: getSubtitle(),
+        album: '聊天保活',
+        artwork: [{src:'icon-192.PNG', sizes:'192x192', type:'image/png'}]
+      });
+      navigator.mediaSession.playbackState = 'playing';
+    } catch(e) {}
+  };
+
+  // 每次保活启动后，应用自定义名字
+  const origStart = window.startKeepAlive;
+  window.startKeepAlive = function(){
+    if (origStart) origStart();
+    setTimeout(window.__updateMediaMeta, 100);
+  };
+
+  function buildCard() {
+    const mePage = document.getElementById('me');
+    if (!mePage) { setTimeout(buildCard, 500); return; }
+    if (document.getElementById('mediaNameCard')) return;
+
+    const card = document.createElement('div');
+    card.className = 'section card';
+    card.id = 'mediaNameCard';
+    card.innerHTML = `
+      <div class="row" id="mediaNameRow" style="cursor:pointer">
+        <div class="icon settingsIcon iconSvg" style="background:#e9e9ec!important;color:#333!important">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+        </div>
+        <div class="rowmain">
+          <div class="title">控制中心名字</div>
+          <div class="desc" id="mediaNameDesc">${esc(getTitle())} · ${esc(getSubtitle())}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>
+    `;
+    const pushCard = document.getElementById('pushCard');
+    if (pushCard && pushCard.nextSibling) mePage.insertBefore(card, pushCard.nextSibling);
+    else {
+      const first = mePage.querySelector('.section.card');
+      if (first && first.nextSibling) mePage.insertBefore(card, first.nextSibling);
+      else mePage.appendChild(card);
+    }
+    card.querySelector('#mediaNameRow').onclick = openEditor;
+  }
+
+  function openEditor() {
+    modal('控制中心名字',
+      '<div class="desc" style="margin-bottom:12px;line-height:1.6">这两个名字会显示在控制中心和锁屏的媒体卡片上。</div>' +
+      '<div class="field"><label>标题（大字）</label><input id="mediaTitleInput" class="textinput" maxlength="20" value="' + esc(getTitle()) + '"></div>' +
+      '<div class="field"><label>副标题（小字）</label><input id="mediaSubtitleInput" class="textinput" maxlength="20" value="' + esc(getSubtitle()) + '"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="action secondary" style="flex:1;margin:0" onclick="closeModal()">取消</button>' +
+      '<button class="action" style="flex:1;margin:0" onclick="window.__saveMediaName()">保存</button>' +
+      '</div>'
+    );
+  }
+
+  window.__saveMediaName = function(){
+    const t = (document.getElementById('mediaTitleInput').value || '').trim() || 'ievan';
+    const s = (document.getElementById('mediaSubtitleInput').value || '').trim() || '在线';
+    localStorage.setItem('mediaTitle', t);
+    localStorage.setItem('mediaSubtitle', s);
+    const d = document.getElementById('mediaNameDesc');
+    if (d) d.textContent = t + ' · ' + s;
+    window.__updateMediaMeta();
+    closeModal();
+    if (typeof showToast === 'function') showToast('已保存');
+  };
+
+  // 切到"我的"页面时构建卡片
+  const origShowPage = window.showPage;
+  window.showPage = function(id) {
+    const r = origShowPage ? origShowPage.apply(this, arguments) : undefined;
+    if (id === 'me') setTimeout(buildCard, 200);
+    return r;
+  };
+
+  setTimeout(buildCard, 2500);
+  console.log('✅ v26 已加载');
+})();
