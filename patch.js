@@ -712,3 +712,92 @@ window.sendMsg = function() {
 })();
 
 console.log('✅ patch.js 精简版已加载');
+// ====== v23：修复保活音频 + 增强性能 ======
+(function(){
+  if (window.__v23) return;
+  window.__v23 = true;
+
+  // 生成一个真正的静音 WAV
+  function genSilentWav(seconds) {
+    const sampleRate = 8000;
+    const numSamples = Math.floor(sampleRate * seconds);
+    const buf = new ArrayBuffer(44 + numSamples);
+    const view = new DataView(buf);
+    function ws(o, s) { for (let i = 0; i < s.length; i++) view.setUint8(o+i, s.charCodeAt(i)); }
+    ws(0, 'RIFF'); view.setUint32(4, 36 + numSamples, true);
+    ws(8, 'WAVE'); ws(12, 'fmt ');
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate, true);
+    view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+    ws(36, 'data'); view.setUint32(40, numSamples, true);
+    for (let i = 0; i < numSamples; i++) view.setUint8(44 + i, 128);
+    return new Blob([buf], {type: 'audio/wav'});
+  }
+
+  // 覆盖保活函数
+  window.startKeepAlive = function() {
+    if (window.keepAliveAudio && !window.keepAliveAudio.paused) return;
+    try {
+      const blob = genSilentWav(2);
+      const url = URL.createObjectURL(blob);
+      if (window.keepAliveAudio) { try { window.keepAliveAudio.pause(); } catch(e){} }
+      window.keepAliveAudio = new Audio(url);
+      window.keepAliveAudio.loop = true;
+      window.keepAliveAudio.volume = 0.01;
+      window.keepAliveAudio.setAttribute('playsinline', 'true');
+      window.keepAliveAudio.play().then(() => {
+        console.log('✅ 保活音频已开始播放');
+      }).catch(err => console.log('播放失败:', err));
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: '简约聊天', artist: '后台运行中', album: '聊天保活',
+            artwork: [{src:'icon-192.PNG', sizes:'192x192', type:'image/png'}]
+          });
+          navigator.mediaSession.playbackState = 'playing';
+        } catch(e) {}
+      }
+    } catch(err) { console.log('保活初始化失败:', err); }
+  };
+
+  // 第一次用户交互时自动启动（绕过 iOS 自动播放限制）
+  function onFirstTouch() {
+    if (typeof window.startKeepAlive === 'function') window.startKeepAlive();
+  }
+  document.addEventListener('touchstart', onFirstTouch, {once: true, passive: true});
+  document.addEventListener('click', onFirstTouch, {once: true, passive: true});
+
+  // 如果之前已授权通知，延迟启动
+  setTimeout(function(){
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      if (typeof window.startKeepAlive === 'function') window.startKeepAlive();
+    }
+  }, 2000);
+
+  // 进一步优化 save：改用 requestIdleCallback
+  if (!window.__saveIdle) {
+    window.__saveIdle = true;
+    const curSave = window.save;
+    let scheduled = false, res2 = [];
+    window.save = function() {
+      return new Promise(function(resolve) {
+        res2.push(resolve);
+        if (scheduled) return;
+        scheduled = true;
+        function doSave() {
+          scheduled = false;
+          const rs = res2.slice(); res2 = [];
+          try {
+            const p = curSave ? curSave() : null;
+            if (p && p.then) p.then(() => rs.forEach(r => r())).catch(() => rs.forEach(r => r()));
+            else rs.forEach(r => r());
+          } catch(e) { rs.forEach(r => r()); }
+        }
+        if (window.requestIdleCallback) requestIdleCallback(doSave, {timeout: 1500});
+        else setTimeout(doSave, 800);
+      });
+    };
+  }
+
+  console.log('✅ v23 已加载');
+})();
