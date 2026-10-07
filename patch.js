@@ -1325,3 +1325,98 @@ console.log('✅ 性能与回复体验优化补丁已加载');
 
   console.log('✅ 表情包布局 + 聊天滚动修复已加载');
 })();
+// ====== v21：表情包布局修复 + 聊天自动滚到底部 ======
+(function(){
+
+  // 1. 表情包面板：干净的正方形网格（覆盖之前的错误样式）
+  const style = document.createElement('style');
+  style.textContent = `
+    .stickerPanel {
+      display: grid !important;
+      grid-template-columns: repeat(4, 1fr) !important;
+      grid-auto-rows: auto !important;
+      gap: 8px !important;
+      max-height: 360px !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      padding: 6px !important;
+      background: #f6f6f8 !important;
+      border-radius: 12px !important;
+      align-items: start !important;
+      box-sizing: border-box !important;
+    }
+    .stickerItem {
+      position: relative !important;
+      display: block !important;
+      width: 100% !important;
+      height: auto !important;
+      padding: 0 !important;
+      padding-bottom: 0 !important;
+      aspect-ratio: 1 / 1 !important;
+      border-radius: 10px !important;
+      overflow: hidden !important;
+      background: #fff !important;
+      box-sizing: border-box !important;
+    }
+    .stickerItem img {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      display: block !important;
+      cursor: pointer !important;
+    }
+    .stickerDel {
+      position: absolute !important;
+      top: 4px !important;
+      right: 4px !important;
+      z-index: 10 !important;
+      width: 20px !important;
+      height: 20px !important;
+      border-radius: 50% !important;
+      background: rgba(0,0,0,.5) !important;
+      color: #fff !important;
+      font-size: 13px !important;
+      line-height: 1 !important;
+      display: grid !important;
+      place-items: center !important;
+      cursor: pointer !important;
+      border: 0 !important;
+      padding: 0 !important;
+      font-family: inherit !important;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // 2. 聊天气泡自动滚到底部（用 MutationObserver 监听内容变化）
+  if (!window.__scrollFix2) {
+    window.__scrollFix2 = true;
+
+    function attachScrollObserver() {
+      const b = document.getElementById('bubbles');
+      if (!b || b._scrollObserver) return;
+      b._scrollObserver = true;
+
+      let wasAtBottom = true;
+      b.addEventListener('scroll', function() {
+        wasAtBottom = (b.scrollHeight - b.scrollTop - b.clientHeight) < 80;
+      }, { passive: true });
+
+      const obs = new MutationObserver(function() {
+        if (wasAtBottom) {
+          requestAnimationFrame(function() {
+            b.scrollTop = b.scrollHeight;
+          });
+        }
+      });
+      obs.observe(b, { childList: true, subtree: true });
+    }
+
+    setTimeout(attachScrollObserver, 1500);
+    setInterval(attachScrollObserver, 2000);
+  }
+
+  console.log('✅ v21 表情包布局 + 自动滚屏已加载');
+})();
