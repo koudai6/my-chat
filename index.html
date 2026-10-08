@@ -363,7 +363,7 @@ const ICONS={
  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 16-.7 4 4-.7L19 8.6 15.4 5 5 16Z"/><path d="m13.8 6.6 3.6 3.6"/></svg>',
  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13M10 10v7M14 10v7"/></svg>'
 };
-const DB='simple_chat_v3',STORE='state',BACKUP_KEY='simple_chat_state_backup_v3',CHAT_BACKUP_KEY='simple_chat_chat_backup_v1';
+const DB='simple_chat_v4',STORE='state',CHAT_STORE='chats',BACKUP_KEY='simple_chat_state_backup_v4',CHAT_BACKUP_KEY='simple_chat_chat_backup_v2';
 let db,state,currentFriend=null,currentGroup='全部',currentType='全部',callTimer=null,callSeconds=0,callScheduler=null,activeSendTimer=null;
 const DEF_PROB=50;
 const DEF_EMOJI=['😂','🥺','❤️','😭','😊','🥰','😅','🤔','😴','🙄','😳','🥲','😘','😍','😏','😢','😡','🤗','😌','😉'];
@@ -375,13 +375,13 @@ function readBackup(){
     return x&&x.state?x:null;
   }catch(e){return null}
 }
-function readLegacyBackup(){
+function readOlderBackup(key){
   try{
-    const raw=localStorage.getItem('simple_chat_state_backup_v2');
+    const raw=localStorage.getItem(key);
     if(!raw)return null;
     const x=JSON.parse(raw);
     if(x&&x.state)return x;
-    if(x&&x.friends)return {savedAt:0,state:x};
+    if(x&&x.friends)return {savedAt:Number(x.savedAt)||0,state:x};
   }catch(e){}
   return null;
 }
@@ -393,6 +393,16 @@ function readChatBackup(){
     return x&&Array.isArray(x.friends)?x:null;
   }catch(e){return null}
 }
+function slimChatForLocal(chat){
+  // 本地 localStorage 只做兜底；图片/大数据交给 IndexedDB，避免 iPhone 主屏幕版因配额导致整个聊天快照写入失败。
+  return (Array.isArray(chat)?chat:[]).map(m=>{
+    const x={...m};
+    if(typeof x.image==='string' && x.image.length>20000) delete x.image;
+    if(x.poll && typeof x.poll==='object') x.poll={...x.poll};
+    if(x.quote && typeof x.quote==='object') x.quote={...x.quote};
+    return x;
+  });
+}
 function writeBackup(){
   const stamp=Date.now();
   let fullOk=false;
@@ -400,10 +410,8 @@ function writeBackup(){
     localStorage.setItem(BACKUP_KEY,JSON.stringify({savedAt:stamp,state}));
     fullOk=true;
   }catch(e){}
-  // 聊天记录单独做一个小型同步快照；即使完整 state 因图片/字卡过大无法写入 localStorage，
-  // 文字聊天的发送/删除也能在下一次打开时恢复。
   try{
-    const friends=(state.friends||[]).map(f=>({id:f.id,chat:Array.isArray(f.chat)?f.chat:[]}));
+    const friends=(state.friends||[]).map(f=>({id:f.id,chat:slimChatForLocal(f.chat)}));
     localStorage.setItem(CHAT_BACKUP_KEY,JSON.stringify({savedAt:stamp,friends}));
   }catch(e){}
   return fullOk;
@@ -422,12 +430,23 @@ function mergeChatBackup(base,chatSnap){
   });
   return base;
 }
-function readLegacyState(){
+function mergeChatRows(base,rows){
+  if(!base||!Array.isArray(base.friends)||!Array.isArray(rows))return base;
+  const byId=new Map(rows.map(x=>[String(x.id),x]));
+  base.friends.forEach(f=>{
+    const row=byId.get(String(f.id));
+    if(row&&Array.isArray(row.chat))f.chat=row.chat;
+  });
+  return base;
+}
+function readLegacyState(dbName){
   return new Promise(resolve=>{
     let r;
-    try{r=indexedDB.open('simple_chat_v2',1)}catch(e){return resolve(null)}
+    try{r=indexedDB.open(dbName,1)}catch(e){return resolve(null)}
+    r.onupgradeneeded=()=>{};
     r.onsuccess=()=>{
       const oldDb=r.result;
+      if(!oldDb.objectStoreNames.contains('state')){try{oldDb.close()}catch(e){};return resolve(null)}
       try{
         const q=oldDb.transaction('state','readonly').objectStore('state').get('state');
         q.onsuccess=()=>{const v=q.result;try{oldDb.close()}catch(e){};resolve(extractStored(v))};
@@ -435,74 +454,151 @@ function readLegacyState(){
       }catch(e){try{oldDb.close()}catch(e){};resolve(null)}
     };
     r.onerror=()=>resolve(null);
+  });
+}
+function readLegacyChats(dbName){
+  return new Promise(resolve=>{
+    let r;
+    try{r=indexedDB.open(dbName,1)}catch(e){return resolve(null)}
     r.onupgradeneeded=()=>{};
+    r.onsuccess=()=>{
+      const oldDb=r.result;
+      if(!oldDb.objectStoreNames.contains('chats')){try{oldDb.close()}catch(e){};return resolve(null)}
+      try{
+        const q=oldDb.transaction('chats','readonly').objectStore('chats').getAll();
+        q.onsuccess=()=>{const v=q.result;try{oldDb.close()}catch(e){};resolve(Array.isArray(v)?v:null)};
+        q.onerror=()=>{try{oldDb.close()}catch(e){};resolve(null)};
+      }catch(e){try{oldDb.close()}catch(e){};resolve(null)}
+    };
+    r.onerror=()=>resolve(null);
+  });
+}
+async function readV4Chats(){
+  if(!db||!db.objectStoreNames.contains(CHAT_STORE))return null;
+  return new Promise(resolve=>{
+    try{
+      const q=db.transaction(CHAT_STORE,'readonly').objectStore(CHAT_STORE).getAll();
+      q.onsuccess=()=>resolve(Array.isArray(q.result)?q.result:null);
+      q.onerror=()=>resolve(null);
+    }catch(e){resolve(null)}
   });
 }
 async function initDB(){
   const freshBackup=readBackup();
-  const legacyBackup=readLegacyBackup();
+  const legacyBackupV3=readOlderBackup('simple_chat_state_backup_v3');
+  const legacyBackupV2=readOlderBackup('simple_chat_state_backup_v2');
   const chatBackup=readChatBackup();
   if(!window.indexedDB){
-    const chosen=(freshBackup&&legacyBackup)?(freshBackup.savedAt>=legacyBackup.savedAt?freshBackup:legacyBackup):(freshBackup||legacyBackup);
-    state=chosen?.state||clone(defaults);
-    if(chatBackup&&(chatBackup.savedAt||0)>(chosen?.savedAt||0))mergeChatBackup(state,chatBackup);
+    const candidates=[freshBackup,legacyBackupV3,legacyBackupV2].filter(Boolean);
+    candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+    state=candidates[0]?.state||clone(defaults);
+    if(chatBackup&&(chatBackup.savedAt||0)>(candidates[0]?.savedAt||0))mergeChatBackup(state,chatBackup);
     normalizeState();return;
   }
   let r;
-  try{r=indexedDB.open(DB,1)}catch(e){
-    const old=await readLegacyState();
-    const candidates=[freshBackup,legacyBackup,old].filter(Boolean);
+  try{r=indexedDB.open(DB,2)}catch(e){
+    const old3=await readLegacyState('simple_chat_v3');
+    const old2=await readLegacyState('simple_chat_v2');
+    const candidates=[freshBackup,legacyBackupV3,legacyBackupV2,old3,old2].filter(Boolean);
     candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
     state=candidates[0]?.state||clone(defaults);
     if(chatBackup&&(chatBackup.savedAt||0)>(candidates[0]?.savedAt||0))mergeChatBackup(state,chatBackup);
     normalizeState();return;
   }
   await new Promise(resolve=>{
-    r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE)};
+    r.onupgradeneeded=()=>{
+      const d=r.result;
+      if(!d.objectStoreNames.contains(STORE))d.createObjectStore(STORE);
+      if(!d.objectStoreNames.contains(CHAT_STORE))d.createObjectStore(CHAT_STORE,{keyPath:'id'});
+    };
     r.onsuccess=async()=>{
       db=r.result;
       db.onversionchange=()=>{try{db.close()}catch(e){}};
-      let q;
-      try{q=db.transaction(STORE,'readonly').objectStore(STORE).get('state')}catch(e){return resolve()}
-      q.onsuccess=async()=>{
-        let dbSnap=extractStored(q.result);
-        let oldSnap=null;
-        if(!dbSnap)oldSnap=await readLegacyState();
-        const candidates=[freshBackup,legacyBackup,dbSnap,oldSnap].filter(Boolean);
-        candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
-        const newest=candidates[0];
-        state=newest?.state||clone(defaults);
-        if(chatBackup&&(chatBackup.savedAt||0)>(newest?.savedAt||0))mergeChatBackup(state,chatBackup);
-        normalizeState();
-        // 统一把迁移后的最新数据写进 v3。
-        save().then(resolve);
-      };
-      q.onerror=async()=>{const old=await readLegacyState();state=(freshBackup||legacyBackup||old)?.state||clone(defaults);normalizeState();save().then(resolve)};
+      let dbSnap=null, chatRows=null;
+      try{
+        if(db.objectStoreNames.contains(STORE)){
+          const q=db.transaction(STORE,'readonly').objectStore(STORE).get('state');
+          q.onsuccess=async()=>{
+            dbSnap=extractStored(q.result);
+            chatRows=await readV4Chats();
+            const old3=dbSnap?null:await readLegacyState('simple_chat_v3');
+            const old2=dbSnap?null:await readLegacyState('simple_chat_v2');
+            const oldChats=dbSnap?null:await readLegacyChats('simple_chat_v3');
+            const candidates=[freshBackup,legacyBackupV3,legacyBackupV2,dbSnap,old3,old2].filter(Boolean);
+            candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+            const newest=candidates[0];
+            state=newest?.state||clone(defaults);
+            const chatTimes=[
+              chatBackup?{savedAt:chatBackup.savedAt||0,type:'local',data:chatBackup}:null,
+              chatRows&&chatRows.length?{savedAt:Math.max(...chatRows.map(x=>Number(x.savedAt)||0)),type:'idb',data:chatRows}:null,
+              oldChats&&oldChats.length?{savedAt:Math.max(...oldChats.map(x=>Number(x.savedAt)||0)),type:'idb',data:oldChats}:null
+            ].filter(Boolean).sort((a,b)=>b.savedAt-a.savedAt);
+            const latestChat=chatTimes[0];
+            if(latestChat && latestChat.savedAt>(newest?.savedAt||0)){
+              if(latestChat.type==='local') mergeChatBackup(state,latestChat.data);
+              else mergeChatRows(state,latestChat.data);
+            } else if(latestChat && latestChat.type==='idb'){
+              mergeChatRows(state,latestChat.data);
+            }
+            normalizeState();
+            save().then(resolve);
+          };
+          q.onerror=async()=>{
+            const old3=await readLegacyState('simple_chat_v3');
+            const old2=await readLegacyState('simple_chat_v2');
+            const candidates=[freshBackup,legacyBackupV3,legacyBackupV2,old3,old2].filter(Boolean);
+            candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+            state=candidates[0]?.state||clone(defaults);
+            if(chatBackup&&(chatBackup.savedAt||0)>(candidates[0]?.savedAt||0))mergeChatBackup(state,chatBackup);
+            normalizeState();save().then(resolve);
+          };
+        } else {
+          state=(freshBackup||legacyBackupV3||legacyBackupV2)?.state||clone(defaults);
+          normalizeState();save().then(resolve);
+        }
+      }catch(e){
+        state=(freshBackup||legacyBackupV3||legacyBackupV2)?.state||clone(defaults);
+        normalizeState();save().then(resolve);
+      }
     };
-    r.onerror=()=>{resolve()};
-    r.onblocked=()=>{resolve()};
+    r.onerror=()=>resolve();
+    r.onblocked=()=>resolve();
   });
   if(!state){state=clone(defaults);normalizeState()}
 }
-function save(){return new Promise(res=>{
-  // 先同步写本地快照，再异步写 IndexedDB。即使用户马上退出，也能在下次启动时恢复最新状态。
-  const backupOk=writeBackup();
-  if(!db){res(backupOk);return}
-  let tx,q;
-  try{
-    tx=db.transaction(STORE,'readwrite');
-    q=tx.objectStore(STORE).put({savedAt:Date.now(),state},'state');
-  }catch(e){res(backupOk);return}
-  let done=false;
-  const finish=(ok)=>{if(done)return;done=true;res(!!ok||backupOk)};
-  q.onsuccess=()=>finish(true);
-  q.onerror=()=>finish(false);
-  tx.onabort=()=>finish(false);
-  tx.onerror=()=>finish(false);
-})}
-function persistBeforeExit(){try{writeBackup()}catch(e){}}
+function save(){
+  return new Promise(res=>{
+    const stamp=Date.now();
+    const backupOk=writeBackup();
+    if(!db){res(backupOk);return}
+    let stateDone=false,chatDone=false;
+    const finish=()=>{if(stateDone&&chatDone)res(true)};
+    try{
+      const tx=db.transaction(STORE,'readwrite');
+      const q=tx.objectStore(STORE).put({savedAt:stamp,state},'state');
+      q.onsuccess=()=>{stateDone=true;finish()};
+      q.onerror=()=>{stateDone=true;finish()};
+      tx.onabort=()=>{stateDone=true;finish()};
+      tx.onerror=()=>{stateDone=true;finish()};
+    }catch(e){stateDone=true;finish()}
+    try{
+      const tx2=db.transaction(CHAT_STORE,'readwrite');
+      const store=tx2.objectStore(CHAT_STORE);
+      (state.friends||[]).forEach(f=>{
+        store.put({id:f.id,savedAt:stamp,chat:Array.isArray(f.chat)?f.chat:[]});
+      });
+      tx2.oncomplete=()=>{chatDone=true;finish()};
+      tx2.onerror=()=>{chatDone=true;finish()};
+      tx2.onabort=()=>{chatDone=true;finish()};
+    }catch(e){chatDone=true;finish()}
+    // 任一 IndexedDB 分支异常时，本地同步快照仍然已经写入。
+    setTimeout(()=>{if(!stateDone)stateDone=true;if(!chatDone)chatDone=true;finish()},1500);
+  });
+}
+function persistBeforeExit(){try{writeBackup(); if(db) (state.friends||[]).forEach(f=>{try{const tx=db.transaction(CHAT_STORE,'readwrite');tx.objectStore(CHAT_STORE).put({id:f.id,savedAt:Date.now(),chat:Array.isArray(f.chat)?f.chat:[]})}catch(e){}})}catch(e){}}
 window.addEventListener('pagehide',persistBeforeExit);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persistBeforeExit()});
+
 function $(id){return document.getElementById(id)}
 function showPage(id){
   if(id!=='moments')momentReplyTarget=null;
