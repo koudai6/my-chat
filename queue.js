@@ -1,0 +1,161 @@
+// ============ queue.js：消息队列 ============
+(function(){
+  if (window.__msgQueue) return;
+  window.__msgQueue = true;
+  window._pendingQueue = [];
+
+  window.showPlusMenu = function(){
+    modal('＋', '<div class="grid2">' +
+      '<button class="tool" type="button" onclick="closeModal();showLetterHome()"><b>写信</b><span>信封 / 历史信件</span></button>' +
+      '<button class="tool" onclick="closeModal();showSurveyMenu()"><b>问卷系统</b><span>抉择 / 字卡回答</span></button>' +
+      '<button class="tool" onclick="closeModal();showDecoration()"><b>装扮系统</b><span>气泡 / 背景 / 头像框</span></button>' +
+      '<button class="tool" onclick="closeModal();showStorage()"><b>存储系统</b><span>清理记录</span></button>' +
+      '<button class="tool" onclick="closeModal();showSettings()"><b>设置</b><span>全局设置</span></button>' +
+      '<button class="tool" onclick="closeModal();openQueuePanel()"><b>消息队列</b><span>一次编辑，逐条发送</span></button>' +
+      '</div>');
+  };
+
+  window.openQueuePanel = function(){
+    if (!currentFriend) { showToast('请先进入聊天'); return; }
+    window._pendingQueue = window._pendingQueue || [];
+    renderQueuePanel();
+  };
+
+  window.renderQueuePanel = function() {
+    if (!currentFriend) return;
+    let html = '<div class="desc" style="margin-bottom:10px;line-height:1.6">在这里编辑要发送的内容，发送时会按顺序逐条发出，且只触发对方一次回复。</div>';
+    html += '<div id="queuePreview" style="max-height:200px;overflow:auto;margin-bottom:12px;">';
+    if (window._pendingQueue.length === 0) {
+      html += '<div class="desc" style="text-align:center;padding:16px 0">队列为空，请在下方添加消息</div>';
+    } else {
+      window._pendingQueue.forEach(function(item, i){
+        let preview = item.text || (item.image ? '[图片]' : '');
+        let thumb = item.image ? '<img src="'+item.image+'" style="width:36px;height:36px;border-radius:6px;object-fit:cover;margin-right:8px;flex:none;">' : '';
+        html += '<div style="display:flex;align-items:center;padding:8px;background:#f6f6f8;border-radius:10px;margin-bottom:6px;">' +
+          thumb +
+          '<div style="flex:1;min-width:0;font-size:.84rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(preview) + '</div>' +
+          '<button onclick="removeQueueItem('+i+')" style="color:#999;font-size:18px;padding:0 6px;">×</button>' +
+          '</div>';
+      });
+    }
+    html += '</div>';
+    html += '<div class="field"><label>添加消息</label>';
+    html += '<textarea id="queueInput" class="textinput" rows="2" placeholder="输入要加入队列的文字..." style="resize:vertical;margin-bottom:8px;"></textarea>';
+    html += '<div style="display:flex;gap:8px;margin-top:8px;">';
+    html += '<label class="action secondary" style="flex:1;margin:0;text-align:center;cursor:pointer;padding:9px;font-size:.8rem">＋ 加图片<input type="file" accept="image/*" hidden onchange="addQueueImage(event)"></label>';
+    html += '<button class="action secondary" style="flex:1;margin:0;padding:9px;font-size:.8rem" onclick="openStickerPickForQueue()">＋ 加表情包</button>';
+    html += '<button class="action" style="flex:1;margin:0;padding:9px;font-size:.8rem" onclick="addQueueItem()">加入队列</button>';
+    html += '</div></div>';
+    html += '<button class="action" style="margin-top:16px;width:100%;background:#1a1a1e" onclick="sendQueueAll()">🚀 一键发送队列（共 ' + window._pendingQueue.length + ' 条）</button>';
+    html += '<button class="action secondary" style="width:100%;margin-top:8px" onclick="closeModal()">取消</button>';
+    modal('消息队列', html);
+  };
+
+  window.addQueueItem = function() {
+    const input = document.getElementById('queueInput');
+    const text = input ? input.value.trim() : '';
+    if (!text) { showToast('请输入文字'); return; }
+    window._pendingQueue.push({ type:'text', text: text, time: Date.now() });
+    renderQueuePanel();
+  };
+
+  window.addQueueImage = function(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function() {
+      window._pendingQueue.push({ type:'image', image: reader.result, text: '[图片]', time: Date.now() });
+      renderQueuePanel();
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.openStickerPickForQueue = function() {
+    const stickers = state.cards.filter(function(c){ return c.type === 'image' && c.image && c.enabled !== false; });
+    if (!stickers.length) { showToast('字卡库里还没有表情包'); return; }
+    let html = '<div class="desc" style="margin-bottom:10px">点击表情包加入队列</div>';
+    html += '<div class="stickerPanel">';
+    stickers.forEach(function(s){
+      html += '<button class="stickerItem" onclick="addQueueSticker(\'' + String(s.id) + '\')"><img src="' + s.image + '" alt=""></button>';
+    });
+    html += '</div>';
+    html += '<button class="action secondary" style="margin-top:14px" onclick="renderQueuePanel()">返回编辑</button>';
+    modal('选择表情包', html);
+  };
+
+  window.addQueueSticker = function(id) {
+    const s = state.cards.find(function(c){ return String(c.id) === String(id); });
+    if (!s) return;
+    window._pendingQueue.push({ type:'image', image: s.image, text: '[表情包]', time: Date.now() });
+    renderQueuePanel();
+  };
+
+  window.removeQueueItem = function(i) {
+    window._pendingQueue.splice(i, 1);
+    renderQueuePanel();
+  };
+
+  window.sendQueueAll = function() {
+    if (!window._pendingQueue.length) { showToast('队列为空'); return; }
+    if (!currentFriend) { showToast('请先进入聊天'); return; }
+    const friend = currentFriend;
+    const queue = window._pendingQueue.slice();
+    window._pendingQueue = [];
+    closeModal();
+    clearTimeout(friend._cardTimer);
+    clearTimeout(friend._typingTimer);
+
+    function E(s){ return typeof esc === 'function' ? esc(s) : String(s); }
+    function fmtTime(t){
+      if (!state.chatSettings) return '';
+      if (state.chatSettings.timeFormat === 'hide' || !t) return '';
+      const d = new Date(t);
+      const hh = String(d.getHours()).padStart(2,'0'), mi = String(d.getMinutes()).padStart(2,'0'), se = String(d.getSeconds()).padStart(2,'0');
+      return state.chatSettings.timeFormat === 'minutes' ? hh+':'+mi : hh+':'+mi+':'+se;
+    }
+
+    let i = 0;
+    function sendNext() {
+      if (i >= queue.length) {
+        const cs = state.chatSettings || {};
+        const min = Math.max(1, +cs.min || 30);
+        const max = Math.max(min, +cs.max || 120);
+        const delay = (min + Math.random() * (max - min)) * 1000;
+        friend._typing = true;
+        if (friend === currentFriend && typeof renderBubbles === 'function') renderBubbles();
+        friend._typingTimer = setTimeout(function(){
+          if (currentFriend !== friend) return;
+          friend._typing = false;
+          if (typeof runCardPopup === 'function') runCardPopup(friend);
+        }, delay);
+        if (typeof save === 'function') save();
+        return;
+      }
+      const item = queue[i];
+      const msg = { who:'me', text: item.text || '', time: Date.now() };
+      if (item.image) { msg.image = item.image; msg.text = '[图片/表情包]'; }
+      friend.chat.push(msg);
+
+      const b = document.getElementById('bubbles');
+      if (b && friend === currentFriend) {
+        const idx = friend.chat.length - 1;
+        const q = msg.quote ? '<div class="quoteBubble">↩ ' + E(msg.quote) + '</div>' : '';
+        const inner = msg.image ? '<img class="sticker" src="'+msg.image+'" style="cursor:pointer">' : E(msg.text);
+        const t = fmtTime(msg.time);
+        const av = typeof meAvatarHtml === 'function' ? meAvatarHtml() : '<div class="avatarSmall">我</div>';
+        const html = '<div class="bubbleRow me" data-idx="'+idx+'"><div class="msgWrap"><div class="bubble'+(msg.image?' stickerBubble':'')+'" data-idx="'+idx+'">'+q+inner+'</div></div><div class="avatarCol">'+av+(t?'<div class="bubbleMeta">'+t+'</div>':'')+'</div></div>';
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        b.appendChild(tmp.firstChild);
+        requestAnimationFrame(function(){ b.scrollTop = b.scrollHeight; });
+      } else if (typeof renderBubbles === 'function') {
+        renderBubbles();
+      }
+      i++;
+      setTimeout(sendNext, 450);
+    }
+    sendNext();
+  };
+
+  console.log('✅ queue.js 已加载');
+})();
