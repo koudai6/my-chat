@@ -363,161 +363,135 @@ const ICONS={
  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 16-.7 4 4-.7L19 8.6 15.4 5 5 16Z"/><path d="m13.8 6.6 3.6 3.6"/></svg>',
  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13M10 10v7M14 10v7"/></svg>'
 };
-const DB='simple_chat_v2',STORE='state',BACKUP_KEY='simple_chat_state_backup_v2';
+const DB='simple_chat_v3',STORE='state',BACKUP_KEY='simple_chat_state_backup_v3',CHAT_BACKUP_KEY='simple_chat_chat_backup_v1';
 let db,state,currentFriend=null,currentGroup='全部',currentType='全部',callTimer=null,callSeconds=0,callScheduler=null,activeSendTimer=null;
 const DEF_PROB=50;
 const DEF_EMOJI=['😂','🥺','❤️','😭','😊','🥰','😅','🤔','😴','🙄','😳','🥲','😘','😍','😏','😢','😡','🤗','😌','😉'];
-const FONT_PRESETS={
- system:{name:'系统默认',stack:'-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Helvetica Neue",Arial,sans-serif'},
- rounded:{name:'圆润黑体',stack:'"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif'},
- serif:{name:'衬线 / 宋体',stack:'Georgia,"Times New Roman","Songti SC","SimSun",serif'},
- kaiti:{name:'楷体',stack:'"Kaiti SC","STKaiti","KaiTi","楷体",serif'},
- mono:{name:'等宽',stack:'"SF Mono",Menlo,Consolas,"Courier New",monospace'}
-};
-const defaults={
-  me:{name:'涵涵',id:'hanhan_01',avatar:'涵'},
-  font:'1',
-  fontFamily:'system',
-  customFonts:[],
-  groups:[{id:'public',name:'公共（未分组）',enabled:true,probability:DEF_PROB}],
-  cards:[
-    {id:1,type:'text',text:'好呀',group:'public',enabled:true,probability:50,cooldown:30},
-    {id:2,type:'text',text:'哈哈哈哈',group:'public',enabled:true,probability:50,cooldown:30},
-    {id:3,type:'text',text:'我才没有生气！',group:'public',enabled:true,probability:50,cooldown:30},
-    {id:4,type:'text',text:'哼',group:'public',enabled:true,probability:50,cooldown:30}
-  ],
-  emojis:DEF_EMOJI.slice(),
-  moments:{background:'',posts:[]},
-  momentNotifications:[],
-  surveyHistory:[],
-  friends:[
-    {id:'f1',name:'林林',uid:'linlin_01',avatar:'林',unread:1,chat:[{who:'other',text:'晚上一起吃饭吗',time:'01:08'},{who:'me',text:'好呀，几点？',time:'01:09'}]},
-    {id:'f2',name:'小涵',uid:'xiaohan_02',avatar:'涵',unread:0,chat:[{who:'other',text:'晚安',time:'昨天'}]}
-  ],
-  chatSettings:{
-    min:30,max:120,
-    cardMinCount:1,cardMaxCount:3,
-    stickerProb:20,emojiProb:20,emojiMixMode:true,
-    quoteProb:30,quoteEnabled:true,
-    callIntervalMin:15,callIntervalMax:60,
-    callTriggerProb:25,hangupProb:35,
-    activeSendEnabled:false,activeSendInterval:5,
-    timeFormat:'seconds',
-    letterMin:30,letterMax:120,letterMinCards:2,letterMaxCards:5,
-    letterActiveEnabled:true,letterActiveMin:1,letterActiveMax:8,letterActiveDailyMax:3,
-    momentPostMin:30,momentPostMax:6,
-    momentLikeMin:15,momentLikeMax:3,
-    momentCommentMin:15,momentCommentMax:3,
-    momentReplyMin:15,momentReplyMax:3
-  }
-};
-function clone(x){return JSON.parse(JSON.stringify(x))}
-function normalizeState(){
-  if(!state.me)state.me=clone(defaults.me);
-  if(!state.me.avatar)state.me.avatar=state.me.name?state.me.name[0]:'我';
-  if(!state.chatSettings)state.chatSettings=clone(defaults.chatSettings);
-  else{
-    let d=defaults.chatSettings;
-    for(let k in d)if(state.chatSettings[k]===undefined)state.chatSettings[k]=d[k];
-  }
-  if(!Array.isArray(state.groups))state.groups=clone(defaults.groups);
-  if(!Array.isArray(state.cards))state.cards=clone(defaults.cards);
-  if(!Array.isArray(state.friends))state.friends=clone(defaults.friends);
-  if(!Array.isArray(state.emojis)||!state.emojis.length)state.emojis=DEF_EMOJI.slice();
-  if(!state.fontFamily)state.fontFamily='system';
-  if(!Array.isArray(state.customFonts))state.customFonts=[];
-  if(!Array.isArray(state.surveyHistory))state.surveyHistory=[];
-  if(!Array.isArray(state.momentNotifications))state.momentNotifications=[];
-  state.momentNotifications=state.momentNotifications.slice(-100);
-  if(!state.moments||typeof state.moments!=='object')state.moments=clone(defaults.moments);
-  if(!Array.isArray(state.moments.posts))state.moments.posts=[];
-  state.groups.forEach(g=>{if(typeof g.probability!=='number')g.probability=DEF_PROB});
-  state.cards.forEach(c=>{
-    if(!c.type)c.type='text';
-    if(typeof c.probability!=='number')c.probability=DEF_PROB;
-    if(typeof c.cooldown!=='number')c.cooldown=0;
-    if(c.type==='image'&&!c.text)c.text='[表情包]';
-  });
-  state.friends.forEach(f=>{
-    if(!Array.isArray(f.chat)) f.chat=[];
-    if(f.unread===undefined) f.unread=0;
-    if(!Array.isArray(f.letters)) f.letters=[];
-    if(!f.decoration) f.decoration={};
-    if(f.nextActiveLetterAt===undefined) f.nextActiveLetterAt=0;
-    if(f.letterUnread===undefined) f.letterUnread=0;
-    if(!f.letterActiveDaily||typeof f.letterActiveDaily!=='object') f.letterActiveDaily={date:'',count:0};
-    if(!Array.isArray(f.moments)) f.moments=[];
-    f.moments.forEach(p=>{
-      if(!Array.isArray(p.likeUsers))p.likeUsers=[];
-      const seenLikes=new Set();p.likeUsers=p.likeUsers.filter(x=>{const id=String(x?.id||'');if(!id||seenLikes.has(id))return false;seenLikes.add(id);return true});
-      p.likes=p.likeUsers.length;
-      if(!Array.isArray(p.comments))p.comments=[];
-      p.comments.forEach(c=>{if(!c.id)c.id='mc'+Date.now()+Math.random().toString(36).slice(2,6);if(!c.byId&&c.by===state.me?.name)c.byId=String(state.me?.id||'me')});
-    });
-    if(!f.moments.length){
-      if(f.id==='f1')f.moments=[{id:'fm1',text:'晚上想去吃点好吃的。',time:'今天 01:16',likes:0,likeUsers:[],comments:[]}];
-      if(f.id==='f2')f.moments=[{id:'fm2',text:'今天也要早点睡。',time:'昨天 23:08',likes:0,likeUsers:[],comments:[]}];
-    }
-  });
-  state.moments.posts.forEach(p=>{
-    if(!Array.isArray(p.likeUsers))p.likeUsers=[];
-    const seenLikes=new Set();p.likeUsers=p.likeUsers.filter(x=>{const id=String(x?.id||'');if(!id||seenLikes.has(id))return false;seenLikes.add(id);return true});
-    p.likes=p.likeUsers.length;
-    if(!Array.isArray(p.comments))p.comments=[];
-    p.comments.forEach(c=>{if(!c.id)c.id='mc'+Date.now()+Math.random().toString(36).slice(2,6);if(!c.byId&&c.by===state.me?.name)c.byId=String(state.me?.id||'me')});
-  });
-}
 function readBackup(){
   try{
     const raw=localStorage.getItem(BACKUP_KEY);
-    return raw?JSON.parse(raw):null;
+    if(!raw)return null;
+    const x=JSON.parse(raw);
+    return x&&x.state?x:null;
+  }catch(e){return null}
+}
+function readLegacyBackup(){
+  try{
+    const raw=localStorage.getItem('simple_chat_state_backup_v2');
+    if(!raw)return null;
+    const x=JSON.parse(raw);
+    if(x&&x.state)return x;
+    if(x&&x.friends)return {savedAt:0,state:x};
+  }catch(e){}
+  return null;
+}
+function readChatBackup(){
+  try{
+    const raw=localStorage.getItem(CHAT_BACKUP_KEY);
+    if(!raw)return null;
+    const x=JSON.parse(raw);
+    return x&&Array.isArray(x.friends)?x:null;
   }catch(e){return null}
 }
 function writeBackup(){
+  const stamp=Date.now();
+  let fullOk=false;
   try{
-    // 只作为兜底备份；IndexedDB 仍是主存储。
-    localStorage.setItem(BACKUP_KEY,JSON.stringify(state));
-    return true;
-  }catch(e){return false}
+    localStorage.setItem(BACKUP_KEY,JSON.stringify({savedAt:stamp,state}));
+    fullOk=true;
+  }catch(e){}
+  // 聊天记录单独做一个小型同步快照；即使完整 state 因图片/字卡过大无法写入 localStorage，
+  // 文字聊天的发送/删除也能在下一次打开时恢复。
+  try{
+    const friends=(state.friends||[]).map(f=>({id:f.id,chat:Array.isArray(f.chat)?f.chat:[]}));
+    localStorage.setItem(CHAT_BACKUP_KEY,JSON.stringify({savedAt:stamp,friends}));
+  }catch(e){}
+  return fullOk;
 }
-function initDB(){return new Promise(res=>{
-  const backup=readBackup();
+function extractStored(x){
+  if(!x)return null;
+  if(x.state&&typeof x.savedAt==='number')return x;
+  return {savedAt:Number(x._persistedAt)||0,state:x};
+}
+function mergeChatBackup(base,chatSnap){
+  if(!base||!chatSnap||!Array.isArray(base.friends))return base;
+  const byId=new Map((chatSnap.friends||[]).map(f=>[String(f.id),f]));
+  base.friends.forEach(f=>{
+    const c=byId.get(String(f.id));
+    if(c&&Array.isArray(c.chat))f.chat=c.chat;
+  });
+  return base;
+}
+function readLegacyState(){
+  return new Promise(resolve=>{
+    let r;
+    try{r=indexedDB.open('simple_chat_v2',1)}catch(e){return resolve(null)}
+    r.onsuccess=()=>{
+      const oldDb=r.result;
+      try{
+        const q=oldDb.transaction('state','readonly').objectStore('state').get('state');
+        q.onsuccess=()=>{const v=q.result;try{oldDb.close()}catch(e){};resolve(extractStored(v))};
+        q.onerror=()=>{try{oldDb.close()}catch(e){};resolve(null)};
+      }catch(e){try{oldDb.close()}catch(e){};resolve(null)}
+    };
+    r.onerror=()=>resolve(null);
+    r.onupgradeneeded=()=>{};
+  });
+}
+async function initDB(){
+  const freshBackup=readBackup();
+  const legacyBackup=readLegacyBackup();
+  const chatBackup=readChatBackup();
   if(!window.indexedDB){
-    state=backup||clone(defaults);normalizeState();return res();
+    const chosen=(freshBackup&&legacyBackup)?(freshBackup.savedAt>=legacyBackup.savedAt?freshBackup:legacyBackup):(freshBackup||legacyBackup);
+    state=chosen?.state||clone(defaults);
+    if(chatBackup&&(chatBackup.savedAt||0)>(chosen?.savedAt||0))mergeChatBackup(state,chatBackup);
+    normalizeState();return;
   }
   let r;
   try{r=indexedDB.open(DB,1)}catch(e){
-    state=backup||clone(defaults);normalizeState();return res();
+    const old=await readLegacyState();
+    const candidates=[freshBackup,legacyBackup,old].filter(Boolean);
+    candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+    state=candidates[0]?.state||clone(defaults);
+    if(chatBackup&&(chatBackup.savedAt||0)>(candidates[0]?.savedAt||0))mergeChatBackup(state,chatBackup);
+    normalizeState();return;
   }
-  r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE)};
-  r.onsuccess=()=>{
-    db=r.result;
-    db.onversionchange=()=>{try{db.close()}catch(e){}};
-    let q;
-    try{q=db.transaction(STORE,'readonly').objectStore(STORE).get('state')}catch(e){
-      state=backup||clone(defaults);normalizeState();return res();
-    }
-    q.onsuccess=()=>{
-      const saved=q.result;
-      // 优先使用 IndexedDB；只有没有数据时才用本地备份。
-      state=saved||backup||clone(defaults);
-      normalizeState();
-      save().then(()=>res());
+  await new Promise(resolve=>{
+    r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE)};
+    r.onsuccess=async()=>{
+      db=r.result;
+      db.onversionchange=()=>{try{db.close()}catch(e){}};
+      let q;
+      try{q=db.transaction(STORE,'readonly').objectStore(STORE).get('state')}catch(e){return resolve()}
+      q.onsuccess=async()=>{
+        let dbSnap=extractStored(q.result);
+        let oldSnap=null;
+        if(!dbSnap)oldSnap=await readLegacyState();
+        const candidates=[freshBackup,legacyBackup,dbSnap,oldSnap].filter(Boolean);
+        candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+        const newest=candidates[0];
+        state=newest?.state||clone(defaults);
+        if(chatBackup&&(chatBackup.savedAt||0)>(newest?.savedAt||0))mergeChatBackup(state,chatBackup);
+        normalizeState();
+        // 统一把迁移后的最新数据写进 v3。
+        save().then(resolve);
+      };
+      q.onerror=async()=>{const old=await readLegacyState();state=(freshBackup||legacyBackup||old)?.state||clone(defaults);normalizeState();save().then(resolve)};
     };
-    q.onerror=()=>{
-      state=backup||clone(defaults);normalizeState();res();
-    };
-  };
-  r.onerror=()=>{state=backup||clone(defaults);normalizeState();res()};
-  r.onblocked=()=>{state=backup||clone(defaults);normalizeState();res()};
-})}
+    r.onerror=()=>{resolve()};
+    r.onblocked=()=>{resolve()};
+  });
+  if(!state){state=clone(defaults);normalizeState()}
+}
 function save(){return new Promise(res=>{
-  let backupOk=writeBackup();
+  // 先同步写本地快照，再异步写 IndexedDB。即使用户马上退出，也能在下次启动时恢复最新状态。
+  const backupOk=writeBackup();
   if(!db){res(backupOk);return}
   let tx,q;
   try{
     tx=db.transaction(STORE,'readwrite');
-    q=tx.objectStore(STORE).put(state,'state');
+    q=tx.objectStore(STORE).put({savedAt:Date.now(),state},'state');
   }catch(e){res(backupOk);return}
   let done=false;
   const finish=(ok)=>{if(done)return;done=true;res(!!ok||backupOk)};
@@ -526,6 +500,9 @@ function save(){return new Promise(res=>{
   tx.onabort=()=>finish(false);
   tx.onerror=()=>finish(false);
 })}
+function persistBeforeExit(){try{writeBackup()}catch(e){}}
+window.addEventListener('pagehide',persistBeforeExit);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persistBeforeExit()});
 function $(id){return document.getElementById(id)}
 function showPage(id){
   if(id!=='moments')momentReplyTarget=null;
