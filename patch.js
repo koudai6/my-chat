@@ -559,3 +559,22 @@
 
   console.log('✅ 删除操作立即写盘已启用');
 })();
+// ====== save 恢复为立即写入（关闭节流） ======
+(function(){
+  if (window.__noThrottle) return;
+  window.__noThrottle = true;
+
+  // 直接用原始实现覆盖 core.js 里的节流版
+  window.save = function() {
+    return new Promise(function(res){
+      if (typeof db === 'undefined' || !db) return res();
+      try {
+        const q = db.transaction(STORE, 'readwrite').objectStore(STORE).put(state, 'state');
+        q.onsuccess = function(){ res(); };
+        q.onerror = function(){ res(); };
+      } catch(e) { res(); }
+    });
+  };
+
+  console.log('✅ save 已恢复为立即写入，不再丢数据');
+})();
