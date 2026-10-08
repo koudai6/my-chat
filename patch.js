@@ -1,94 +1,138 @@
-// ============ patch.js：可靠的保存 ============
+// ============ patch.js：图片分离存储 ============
 (function(){
-  if (window.__finalSave) return;
-  window.__finalSave = true;
-  const LS_KEY = '__chat_state_final';
+  if (window.__imgSep) return;
+  window.__imgSep = true;
+  const LS_KEY = '__chat_state_v4';
+  const IMG_DB = 'chat_images_v1';
+  const IMG_STORE = 'images';
+  let imgDB = null;
 
-  function install() {
-    if (typeof db === 'undefined' || !db || !window.state) { setTimeout(install, 500); return; }
-
-    window.save = function() {
-      try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
-      return new Promise(function(resolve) {
-        try {
-          const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put(state, 'state');
-          tx.oncomplete = function(){ resolve(); };
-          tx.onerror = function(){ resolve(); };
-          tx.onabort = function(){ resolve(); };
-        } catch(e) { resolve(); }
-      });
-    };
-
-    setTimeout(function(){
+  function openImgDB() {
+    return new Promise(function(resolve) {
+      if (imgDB) return resolve();
       try {
-        const raw = localStorage.getItem(LS_KEY);
-        if (!raw) return;
-        const saved = JSON.parse(raw);
-        if (!saved || typeof saved !== 'object') return;
-        if (saved.friends && Array.isArray(saved.friends)) {
-          Object.keys(saved).forEach(function(k){ state[k] = saved[k]; });
-          window.save();
-          if (typeof renderChats === 'function') renderChats();
-          if (typeof renderContacts === 'function') renderContacts();
-        }
-      } catch(e) {}
-    }, 2000);
+        const r = indexedDB.open(IMG_DB, 1);
+        r.onupgradeneeded = function(e) { e.target.result.createObjectStore(IMG_STORE); };
+        r.onsuccess = function(e) { imgDB = e.target.result; resolve(); };
+        r.onerror = function() { resolve(); };
+      } catch(e) { resolve(); }
+    });
   }
-  install();
-})();
 
-console.log('✅ patch.js 已加载');
-// ====== 修复 save 覆盖 ======
-(function(){
-  if (window.__finalSave2) return;
-  window.__finalSave2 = true;
-  const LS_KEY = '__chat_state_final_v2';
+  function hashStr(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36) + '_' + s.length.toString(36);
+  }
 
-  function install() {
-    if (typeof db === 'undefined' || !db) { setTimeout(install, 500); return; }
-    if (typeof state === 'undefined' || !state) { setTimeout(install, 500); return; }
-    if (typeof STORE === 'undefined') { setTimeout(install, 500); return; }
-
-    window.save = function() {
-      let lsOK = false;
+  function putImg(hash, data) {
+    return new Promise(function(resolve) {
+      if (!imgDB) return resolve();
       try {
-        localStorage.setItem(LS_KEY, JSON.stringify(state));
-        lsOK = true;
-      } catch(e) {
-        console.log('localStorage 失败:', e.message || e);
-        if (!window.__lsWarned) {
-          window.__lsWarned = true;
-          if (typeof showToast === 'function') showToast('数据过大，无法同步保存，请及时备份');
-        }
+        const tx = imgDB.transaction(IMG_STORE, 'readwrite');
+        tx.objectStore(IMG_STORE).put(data, hash);
+        tx.oncomplete = function() { resolve(); };
+        tx.onerror = function() { resolve(); };
+      } catch(e) { resolve(); }
+    });
+  }
+
+  function getImg(hash) {
+    return new Promise(function(resolve) {
+      if (!imgDB) return resolve(null);
+      try {
+        const tx = imgDB.transaction(IMG_STORE, 'readonly');
+        const q = tx.objectStore(IMG_STORE).get(hash);
+        q.onsuccess = function() { resolve(q.result || null); };
+        q.onerror = function() { resolve(null); };
+      } catch(e) { resolve(null); }
+    });
+  }
+
+  function walkImages(obj, cb) {
+    const seen = new Set();
+    (function walk(node) {
+      if (!node || typeof node !== 'object' || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      Object.keys(node).forEach(function(k) {
+        const val = node[k];
+        if (k === 'image' && typeof val === 'string') {
+          if (val.indexOf('data:') === 0) cb(node, k, val, 'base64');
+          else if (val.indexOf('__IMG__') === 0) cb(node, k, val.slice(7), 'hash');
+        } else if (val && typeof val === 'object') walk(val);
+      });
+    })(obj);
+  }
+
+  function extract(slimState) {
+    const tasks = [];
+    walkImages(slimState, function(node, key, val, type) {
+      if (type === 'base64') {
+        const hash = hashStr(val);
+        node[key] = '__IMG__' + hash;
+        tasks.push(putImg(hash, val));
       }
-      return new Promise(function(resolve) {
-        try {
-          const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put(state, 'state');
-          tx.oncomplete = function(){ resolve(); };
-          tx.onerror = function(){ resolve(); };
-          tx.onabort = function(){ resolve(); };
-        } catch(e) { resolve(); }
-      });
-    };
+    });
+    return Promise.all(tasks);
+  }
 
-    // 启动时用 localStorage 恢复
-    setTimeout(function(){
-      try {
-        const raw = localStorage.getItem(LS_KEY);
-        if (!raw) return;
-        const saved = JSON.parse(raw);
-        if (!saved || typeof saved !== 'object') return;
-        if (saved.friends && Array.isArray(saved.friends)) {
-          Object.keys(saved).forEach(function(k){ state[k] = saved[k]; });
-          window.save();
+  function restore(stateObj) {
+    const tasks = [];
+    walkImages(stateObj, function(node, key, val, type) {
+      if (type === 'hash') {
+        tasks.push(getImg(val).then(function(data) {
+          if (data) node[key] = data;
+        }));
+      }
+    });
+    return Promise.all(tasks);
+  }
+
+  function install() {
+    if (typeof db === 'undefined' || !db || typeof state === 'undefined' || !state || typeof STORE === 'undefined') {
+      setTimeout(install, 500); return;
+    }
+    openImgDB().then(function() {
+      window.save = function() {
+        return new Promise(function(resolve) {
+          try {
+            const slim = JSON.parse(JSON.stringify(state));
+            extract(slim).then(function() {
+              try { localStorage.setItem(LS_KEY, JSON.stringify(slim)); } catch(e) {
+                console.log('localStorage 写失败:', e.message);
+              }
+              try {
+                const tx = db.transaction(STORE, 'readwrite');
+                tx.objectStore(STORE).put(slim, 'state');
+                tx.oncomplete = function() { resolve(); };
+                tx.onerror = function() { resolve(); };
+                tx.onabort = function() { resolve(); };
+              } catch(e) { resolve(); }
+            }).catch(function() { resolve(); });
+          } catch(e) { resolve(); }
+        });
+      };
+
+      let restored = false;
+      function checkRestore() {
+        if (restored) return;
+        let hasHash = false;
+        walkImages(state, function(node, key, val, type) { if (type === 'hash') hasHash = true; });
+        if (!hasHash) return;
+        restore(state).then(function() {
+          restored = true;
           if (typeof renderChats === 'function') renderChats();
           if (typeof renderContacts === 'function') renderContacts();
-          console.log('✅ 已从 localStorage 恢复最新数据');
-        }
-      } catch(e) {}
-    }, 2000);
+          if (typeof currentFriend !== 'undefined' && currentFriend && typeof renderBubbles === 'function') renderBubbles();
+          console.log('✅ 图片已从 IndexedDB 还原');
+        });
+      }
+      setTimeout(checkRestore, 2500);
+      setInterval(checkRestore, 3000);
+    });
   }
+
   install();
+  console.log('✅ patch.js 图片分离存储已加载');
 })();
