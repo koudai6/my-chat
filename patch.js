@@ -484,3 +484,22 @@
 
   console.log('✅ v30 聊天快速打开已启用');
 })();
+// ====== 关闭回复自动循环 ======
+(function(){
+  if (window.__noLoop) return;
+  window.__noLoop = true;
+
+  // 覆盖 scheduleCardPopup：不再自动排下一次
+  window.scheduleCardPopup = function(friend){
+    if (!friend) return;
+    clearTimeout(friend._cardTimer);
+    clearTimeout(friend._typingTimer);
+    friend._typing = false;
+    if (friend === (typeof currentFriend !== 'undefined' ? currentFriend : null)) {
+      if (typeof renderBubbles === 'function') renderBubbles();
+    }
+    // 什么都不做——不再排下一次
+  };
+
+  console.log('✅ 已关闭回复自动循环（发一条→回一次，不再循环）');
+})();
