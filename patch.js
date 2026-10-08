@@ -340,3 +340,68 @@
 
   console.log('✅ 图片放大已加载（直接绑定版）');
 })();
+// ====== 聊天渲染优化：最近 100 条 + 查看全部 ======
+(function(){
+  if (window.__chatLazy) return;
+  window.__chatLazy = true;
+
+  const LIMIT = 100;
+
+  const origRender = window.renderBubbles;
+  window.renderBubbles = function() {
+    if (!currentFriend || !Array.isArray(currentFriend.chat)) {
+      return origRender ? origRender.apply(this, arguments) : undefined;
+    }
+    const chat = currentFriend.chat;
+    if (chat.length <= LIMIT) {
+      if (origRender) origRender.apply(this, arguments);
+      return;
+    }
+    const start = chat.length - LIMIT;
+    const origForEach = chat.forEach;
+    chat.forEach = function(fn) {
+      for (let i = start; i < chat.length; i++) fn(chat[i], i, chat);
+    };
+    try {
+      if (origRender) origRender.apply(this, arguments);
+    } finally {
+      chat.forEach = origForEach;
+    }
+    setTimeout(function(){
+      const b = document.getElementById('bubbles');
+      if (!b) return;
+      if (b.querySelector('.viewAllBtn')) return;
+      const btn = document.createElement('button');
+      btn.className = 'viewAllBtn';
+      btn.style.cssText = 'display:block;margin:10px auto;padding:8px 16px;background:#f0f0f4;color:#666;border:0;border-radius:14px;font-size:.78rem;cursor:pointer;font-family:inherit;';
+      btn.textContent = '查看全部聊天记录（共 ' + chat.length + ' 条）';
+      btn.onclick = function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        window.__showAllHistory();
+      };
+      b.insertBefore(btn, b.firstChild);
+    }, 0);
+  };
+
+  window.__showAllHistory = function() {
+    if (!currentFriend) return;
+    const chat = currentFriend.chat;
+    let html = '<div style="max-height:60vh;overflow-y:auto;background:#f6f6f8;border-radius:12px;padding:10px;font-size:.82rem;line-height:1.6">';
+    chat.forEach(m => {
+      const who = m.who === 'me' ? '我' : (currentFriend.name || '对方');
+      let content;
+      if (m.image) content = '<img src="' + m.image + '" style="max-width:80px;border-radius:8px;display:block;margin-top:4px">';
+      else content = esc(m.text || '');
+      html += '<div style="padding:6px 0;border-bottom:1px solid #ececf0;word-break:break-word">' +
+        '<b>' + esc(who) + '</b>：' + content +
+        '</div>';
+    });
+    html += '</div>';
+    html += '<button class="action secondary" style="margin-top:12px" onclick="closeModal()">关闭</button>';
+    modal('全部聊天记录', html);
+  };
+
+  console.log('✅ 聊天懒加载已启用');
+})();
