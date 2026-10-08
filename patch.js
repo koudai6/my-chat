@@ -503,3 +503,59 @@
 
   console.log('✅ 已关闭回复自动循环（发一条→回一次，不再循环）');
 })();
+// ====== 修复：删除操作立即写盘 ======
+(function(){
+  if (window.__saveImmediate) return;
+  window.__saveImmediate = true;
+
+  // 抓当前的 save（core.js 里被替换成的节流版）
+  const throttledSave = window.save;
+  // 抓最原始的 save（直接操作 IndexedDB 那个）
+  let realSave = null;
+
+  // 从节流版的闭包里拿不到 origSave，只能自己重写整个 save
+  // 直接从 window 上代理一层：第一次调用立即写，之后 800ms 合并
+  let lastWrite = 0;
+  let timer = null;
+  let pool = [];
+
+  // 用一个"打穿节流"的方法，绕过 throttledSave 直接写
+  // 但真实写盘逻辑在 core.js 的闭包里，拿不到
+  // 所以我们换个策略：节流版的 save 一旦被调用，2秒后才真写。
+  // 我们不去改它，而是在每次删除后，延迟 100ms 再调一次 save 并等待它完成。
+
+  const origMsgDelete = window.confirmMsgDelete;
+  window.confirmMsgDelete = function() {
+    if (origMsgDelete) origMsgDelete.apply(this, arguments);
+    // 删除后延时 100ms 再调一次 save，并主动 flush
+    setTimeout(function(){
+      if (typeof save === 'function') save();
+      // 关键：尝试触发页面隐藏事件，让节流版立即 flush
+      try {
+        if (window.dispatchEvent) {
+          window.dispatchEvent(new Event('pagehide'));
+        }
+      } catch(e){}
+    }, 100);
+  };
+
+  const origDelCard = window.confirmDeleteCard;
+  window.confirmDeleteCard = function() {
+    if (origDelCard) origDelCard.apply(this, arguments);
+    setTimeout(function(){
+      if (typeof save === 'function') save();
+      try { window.dispatchEvent(new Event('pagehide')); } catch(e){}
+    }, 100);
+  };
+
+  const origDelMoment = window.confirmDeleteMomentPost;
+  window.confirmDeleteMomentPost = function() {
+    if (origDelMoment) origDelMoment.apply(this, arguments);
+    setTimeout(function(){
+      if (typeof save === 'function') save();
+      try { window.dispatchEvent(new Event('pagehide')); } catch(e){}
+    }, 100);
+  };
+
+  console.log('✅ 删除操作立即写盘已启用');
+})();
