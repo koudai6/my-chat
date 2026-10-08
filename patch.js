@@ -630,3 +630,62 @@
 
   console.log('✅ 删除应急保存已启用');
 })();
+// ====== v31：删除操作持久化 ======
+(function(){
+  if (window.__delQueue) return;
+  window.__delQueue = true;
+  const KEY = '__pending_deletes';
+
+  function getQ() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch(e) { return []; } }
+  function setQ(q) { try { localStorage.setItem(KEY, JSON.stringify(q)); } catch(e) {} }
+  function addQ(item) { const q = getQ(); q.push(item); setQ(q); }
+  function clearQ() { try { localStorage.removeItem(KEY); } catch(e) {} }
+
+  // 拦截"确认删除消息"
+  const orig = window.confirmMsgDelete;
+  if (typeof orig === 'function') {
+    window.confirmMsgDelete = function() {
+      if (typeof currentFriend === 'undefined' || !currentFriend) return orig.apply(this, arguments);
+      const idx = window._deletingIdx;
+      if (idx == null || idx < 0 || idx >= currentFriend.chat.length) return orig.apply(this, arguments);
+      const m = currentFriend.chat[idx];
+      addQ({
+        friendId: currentFriend.id,
+        time: m.time,
+        text: m.text || '',
+        hasImage: !!m.image
+      });
+      return orig.apply(this, arguments);
+    };
+  }
+
+  // 启动时应用待删除记录
+  function apply() {
+    const q = getQ();
+    if (!q.length) return;
+    if (!state || !Array.isArray(state.friends)) return;
+    let changed = false;
+    q.forEach(function(item) {
+      const f = state.friends.find(x => String(x.id) === String(item.friendId));
+      if (!f || !Array.isArray(f.chat)) return;
+      const idx = f.chat.findIndex(m =>
+        m.time === item.time &&
+        (m.text || '') === item.text &&
+        !!m.image === item.hasImage
+      );
+      if (idx >= 0) { f.chat.splice(idx, 1); changed = true; }
+    });
+    clearQ();
+    if (changed) {
+      if (typeof save === 'function') save();
+      if (typeof renderBubbles === 'function' && typeof currentFriend !== 'undefined' && currentFriend) {
+        renderBubbles();
+      }
+      console.log('✅ 重新应用了 ' + q.length + ' 条删除记录');
+    }
+  }
+
+  setTimeout(apply, 2000);
+  setTimeout(apply, 4000);
+  console.log('✅ v31 删除持久化已启用');
+})();
