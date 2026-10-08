@@ -363,7 +363,7 @@ const ICONS={
  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 16-.7 4 4-.7L19 8.6 15.4 5 5 16Z"/><path d="m13.8 6.6 3.6 3.6"/></svg>',
  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13M10 10v7M14 10v7"/></svg>'
 };
-const DB='simple_chat_v1',STORE='state';
+const DB='simple_chat_v2',STORE='state',BACKUP_KEY='simple_chat_state_backup_v2';
 let db,state,currentFriend=null,currentGroup='全部',currentType='全部',callTimer=null,callSeconds=0,callScheduler=null,activeSendTimer=null;
 const DEF_PROB=50;
 const DEF_EMOJI=['😂','🥺','❤️','😭','😊','🥰','😅','🤔','😴','🙄','😳','🥲','😘','😍','😏','😢','😡','🤗','😌','😉'];
@@ -467,14 +467,65 @@ function normalizeState(){
     p.comments.forEach(c=>{if(!c.id)c.id='mc'+Date.now()+Math.random().toString(36).slice(2,6);if(!c.byId&&c.by===state.me?.name)c.byId=String(state.me?.id||'me')});
   });
 }
+function readBackup(){
+  try{
+    const raw=localStorage.getItem(BACKUP_KEY);
+    return raw?JSON.parse(raw):null;
+  }catch(e){return null}
+}
+function writeBackup(){
+  try{
+    // 只作为兜底备份；IndexedDB 仍是主存储。
+    localStorage.setItem(BACKUP_KEY,JSON.stringify(state));
+    return true;
+  }catch(e){return false}
+}
 function initDB(){return new Promise(res=>{
-  if(!indexedDB){state=clone(defaults);normalizeState();return res()}
-  let r=indexedDB.open(DB,1);
-  r.onupgradeneeded=()=>r.result.createObjectStore(STORE);
-  r.onsuccess=()=>{db=r.result;let q=db.transaction(STORE,'readonly').objectStore(STORE).get('state');q.onsuccess=()=>{state=q.result||clone(defaults);normalizeState();save().then(res)}};
-  r.onerror=()=>{state=clone(defaults);normalizeState();res()}
+  const backup=readBackup();
+  if(!window.indexedDB){
+    state=backup||clone(defaults);normalizeState();return res();
+  }
+  let r;
+  try{r=indexedDB.open(DB,1)}catch(e){
+    state=backup||clone(defaults);normalizeState();return res();
+  }
+  r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE)};
+  r.onsuccess=()=>{
+    db=r.result;
+    db.onversionchange=()=>{try{db.close()}catch(e){}};
+    let q;
+    try{q=db.transaction(STORE,'readonly').objectStore(STORE).get('state')}catch(e){
+      state=backup||clone(defaults);normalizeState();return res();
+    }
+    q.onsuccess=()=>{
+      const saved=q.result;
+      // 优先使用 IndexedDB；只有没有数据时才用本地备份。
+      state=saved||backup||clone(defaults);
+      normalizeState();
+      save().then(()=>res());
+    };
+    q.onerror=()=>{
+      state=backup||clone(defaults);normalizeState();res();
+    };
+  };
+  r.onerror=()=>{state=backup||clone(defaults);normalizeState();res()};
+  r.onblocked=()=>{state=backup||clone(defaults);normalizeState();res()};
 })}
-function save(){return new Promise(res=>{if(!db)return res();let q=db.transaction(STORE,'readwrite').objectStore(STORE).put(state,'state');q.onsuccess=()=>res();q.onerror=()=>res()})}
+function save(){return new Promise(res=>{
+  let backupOk=writeBackup();
+  if(!db){res(backupOk);return}
+  let tx,q;
+  try{
+    tx=db.transaction(STORE,'readwrite');
+    q=tx.objectStore(STORE).put(state,'state');
+  }catch(e){res(backupOk);return}
+  let done=false;
+  const finish=(ok)=>{if(done)return;done=true;res(!!ok||backupOk)};
+  q.onsuccess=()=>finish(true);
+  q.onerror=()=>finish(false);
+  tx.onabort=()=>finish(false);
+  tx.onerror=()=>finish(false);
+})}
 function $(id){return document.getElementById(id)}
 function showPage(id){
   if(id!=='moments')momentReplyTarget=null;
