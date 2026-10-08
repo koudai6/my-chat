@@ -363,242 +363,120 @@ const ICONS={
  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 16-.7 4 4-.7L19 8.6 15.4 5 5 16Z"/><path d="m13.8 6.6 3.6 3.6"/></svg>',
  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13M10 10v7M14 10v7"/></svg>'
 };
-const DB='simple_chat_v4',STORE='state',CHAT_STORE='chats',BACKUP_KEY='simple_chat_state_backup_v4',CHAT_BACKUP_KEY='simple_chat_chat_backup_v2';
+const DB='simple_chat_v5',STORE='state',CHAT_STORE='chats',BACKUP_KEY='simple_chat_state_backup_v5',CHAT_BACKUP_KEY='simple_chat_chat_backup_v3';
 let db,state,currentFriend=null,currentGroup='全部',currentType='全部',callTimer=null,callSeconds=0,callScheduler=null,activeSendTimer=null;
 const DEF_PROB=50;
 const DEF_EMOJI=['😂','🥺','❤️','😭','😊','🥰','😅','🤔','😴','🙄','😳','🥲','😘','😍','😏','😢','😡','🤗','😌','😉'];
-function readBackup(){
-  try{
-    const raw=localStorage.getItem(BACKUP_KEY);
-    if(!raw)return null;
-    const x=JSON.parse(raw);
-    return x&&x.state?x:null;
-  }catch(e){return null}
-}
-function readOlderBackup(key){
-  try{
-    const raw=localStorage.getItem(key);
-    if(!raw)return null;
-    const x=JSON.parse(raw);
-    if(x&&x.state)return x;
-    if(x&&x.friends)return {savedAt:Number(x.savedAt)||0,state:x};
-  }catch(e){}
-  return null;
-}
-function readChatBackup(){
-  try{
-    const raw=localStorage.getItem(CHAT_BACKUP_KEY);
-    if(!raw)return null;
-    const x=JSON.parse(raw);
-    return x&&Array.isArray(x.friends)?x:null;
-  }catch(e){return null}
-}
-function slimChatForLocal(chat){
-  // 本地 localStorage 只做兜底；图片/大数据交给 IndexedDB，避免 iPhone 主屏幕版因配额导致整个聊天快照写入失败。
-  return (Array.isArray(chat)?chat:[]).map(m=>{
-    const x={...m};
-    if(typeof x.image==='string' && x.image.length>20000) delete x.image;
-    if(x.poll && typeof x.poll==='object') x.poll={...x.poll};
-    if(x.quote && typeof x.quote==='object') x.quote={...x.quote};
-    return x;
+const FONT_PRESETS={
+ system:{name:'系统默认',stack:'-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Helvetica Neue",Arial,sans-serif'},
+ rounded:{name:'圆润黑体',stack:'"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif'},
+ serif:{name:'衬线 / 宋体',stack:'Georgia,"Times New Roman","Songti SC","SimSun",serif'},
+ kaiti:{name:'楷体',stack:'"Kaiti SC","STKaiti","KaiTi","楷体",serif'},
+ mono:{name:'等宽',stack:'"SF Mono",Menlo,Consolas,"Courier New",monospace'}
+};
+const defaults={
+  me:{name:'涵涵',id:'hanhan_01',avatar:'涵'},
+  font:'1',fontFamily:'system',customFonts:[],
+  groups:[{id:'public',name:'公共（未分组）',enabled:true,probability:DEF_PROB}],
+  cards:[
+    {id:1,type:'text',text:'好呀',group:'public',enabled:true,probability:50,cooldown:30},
+    {id:2,type:'text',text:'哈哈哈哈',group:'public',enabled:true,probability:50,cooldown:30},
+    {id:3,type:'text',text:'我才没有生气！',group:'public',enabled:true,probability:50,cooldown:30},
+    {id:4,type:'text',text:'哼',group:'public',enabled:true,probability:50,cooldown:30}
+  ],
+  emojis:DEF_EMOJI.slice(),moments:{background:'',posts:[]},momentNotifications:[],surveyHistory:[],
+  friends:[
+    {id:'f1',name:'林林',uid:'linlin_01',avatar:'林',unread:1,chat:[{who:'other',text:'晚上一起吃饭吗',time:'01:08'},{who:'me',text:'好呀，几点？',time:'01:09'}]},
+    {id:'f2',name:'小涵',uid:'xiaohan_02',avatar:'涵',unread:0,chat:[{who:'other',text:'晚安',time:'昨天'}]}
+  ],
+  chatSettings:{
+    min:30,max:120,cardMinCount:1,cardMaxCount:3,stickerProb:20,emojiProb:20,emojiMixMode:true,
+    quoteProb:30,quoteEnabled:true,callIntervalMin:15,callIntervalMax:60,callTriggerProb:25,hangupProb:35,
+    activeSendEnabled:false,activeSendInterval:5,timeFormat:'seconds',letterMin:30,letterMax:120,letterMinCards:2,letterMaxCards:5,
+    letterActiveEnabled:true,letterActiveMin:1,letterActiveMax:8,letterActiveDailyMax:3,momentPostMin:30,momentPostMax:6,
+    momentLikeMin:15,momentLikeMax:3,momentCommentMin:15,momentCommentMax:3,momentReplyMin:15,momentReplyMax:3
+  }
+};
+function clone(x){return JSON.parse(JSON.stringify(x))}
+function normalizeState(){
+  if(!state.me)state.me=clone(defaults.me);
+  if(!state.me.avatar)state.me.avatar=state.me.name?state.me.name[0]:'我';
+  if(!state.chatSettings)state.chatSettings=clone(defaults.chatSettings);else{let d=defaults.chatSettings;for(let k in d)if(state.chatSettings[k]===undefined)state.chatSettings[k]=d[k]}
+  if(!Array.isArray(state.groups))state.groups=clone(defaults.groups);
+  if(!Array.isArray(state.cards))state.cards=clone(defaults.cards);
+  if(!Array.isArray(state.friends))state.friends=clone(defaults.friends);
+  if(!Array.isArray(state.emojis)||!state.emojis.length)state.emojis=DEF_EMOJI.slice();
+  if(!state.fontFamily)state.fontFamily='system';
+  if(!Array.isArray(state.customFonts))state.customFonts=[];
+  if(!Array.isArray(state.surveyHistory))state.surveyHistory=[];
+  if(!Array.isArray(state.momentNotifications))state.momentNotifications=[];
+  state.momentNotifications=state.momentNotifications.slice(-100);
+  if(!state.moments||typeof state.moments!=='object')state.moments=clone(defaults.moments);
+  if(!Array.isArray(state.moments.posts))state.moments.posts=[];
+  state.groups.forEach(g=>{if(typeof g.probability!=='number')g.probability=DEF_PROB});
+  state.cards.forEach(c=>{if(!c.type)c.type='text';if(typeof c.probability!=='number')c.probability=DEF_PROB;if(typeof c.cooldown!=='number')c.cooldown=0;if(c.type==='image'&&!c.text)c.text='[表情包]'});
+  state.friends.forEach(f=>{
+    if(!Array.isArray(f.chat))f.chat=[];if(f.unread===undefined)f.unread=0;if(!Array.isArray(f.letters))f.letters=[];if(!f.decoration)f.decoration={};
+    if(f.nextActiveLetterAt===undefined)f.nextActiveLetterAt=0;if(f.letterUnread===undefined)f.letterUnread=0;
+    if(!f.letterActiveDaily||typeof f.letterActiveDaily!=='object')f.letterActiveDaily={date:'',count:0};if(!Array.isArray(f.moments))f.moments=[];
+    f.moments.forEach(p=>{if(!Array.isArray(p.likeUsers))p.likeUsers=[];const seenLikes=new Set();p.likeUsers=p.likeUsers.filter(x=>{const id=String(x?.id||'');if(!id||seenLikes.has(id))return false;seenLikes.add(id);return true});p.likes=p.likeUsers.length;if(!Array.isArray(p.comments))p.comments=[];p.comments.forEach(c=>{if(!c.id)c.id='mc'+Date.now()+Math.random().toString(36).slice(2,6);if(!c.byId&&c.by===state.me?.name)c.byId=String(state.me?.id||'me')})});
+    if(!f.moments.length){if(f.id==='f1')f.moments=[{id:'fm1',text:'晚上想去吃点好吃的。',time:'今天 01:16',likes:0,likeUsers:[],comments:[]}];if(f.id==='f2')f.moments=[{id:'fm2',text:'今天也要早点睡。',time:'昨天 23:08',likes:0,likeUsers:[],comments:[]}]}
   });
+  state.moments.posts.forEach(p=>{if(!Array.isArray(p.likeUsers))p.likeUsers=[];const seenLikes=new Set();p.likeUsers=p.likeUsers.filter(x=>{const id=String(x?.id||'');if(!id||seenLikes.has(id))return false;seenLikes.add(id);return true});p.likes=p.likeUsers.length;if(!Array.isArray(p.comments))p.comments=[];p.comments.forEach(c=>{if(!c.id)c.id='mc'+Date.now()+Math.random().toString(36).slice(2,6);if(!c.byId&&c.by===state.me?.name)c.byId=String(state.me?.id||'me')})});
 }
+function readLocal(key){try{const raw=localStorage.getItem(key);if(!raw)return null;const x=JSON.parse(raw);if(x&&x.state)return x;return null}catch(e){return null}}
+function readChatLocal(){try{const x=JSON.parse(localStorage.getItem(CHAT_BACKUP_KEY)||'');return x&&Array.isArray(x.friends)?x:null}catch(e){return null}}
+function slimChat(chat){return (Array.isArray(chat)?chat:[]).map(m=>{const x={...m};if(typeof x.image==='string'&&x.image.length>30000)delete x.image;return x})}
 function writeBackup(){
   const stamp=Date.now();
-  let fullOk=false;
-  try{
-    localStorage.setItem(BACKUP_KEY,JSON.stringify({savedAt:stamp,state}));
-    fullOk=true;
-  }catch(e){}
-  try{
-    const friends=(state.friends||[]).map(f=>({id:f.id,chat:slimChatForLocal(f.chat)}));
-    localStorage.setItem(CHAT_BACKUP_KEY,JSON.stringify({savedAt:stamp,friends}));
-  }catch(e){}
-  return fullOk;
+  try{localStorage.setItem(BACKUP_KEY,JSON.stringify({savedAt:stamp,state}))}catch(e){}
+  try{localStorage.setItem(CHAT_BACKUP_KEY,JSON.stringify({savedAt:stamp,friends:(state.friends||[]).map(f=>({id:f.id,chat:slimChat(f.chat)}))}))}catch(e){}
 }
-function extractStored(x){
-  if(!x)return null;
-  if(x.state&&typeof x.savedAt==='number')return x;
-  return {savedAt:Number(x._persistedAt)||0,state:x};
-}
-function mergeChatBackup(base,chatSnap){
-  if(!base||!chatSnap||!Array.isArray(base.friends))return base;
-  const byId=new Map((chatSnap.friends||[]).map(f=>[String(f.id),f]));
-  base.friends.forEach(f=>{
-    const c=byId.get(String(f.id));
-    if(c&&Array.isArray(c.chat))f.chat=c.chat;
-  });
-  return base;
-}
-function mergeChatRows(base,rows){
-  if(!base||!Array.isArray(base.friends)||!Array.isArray(rows))return base;
-  const byId=new Map(rows.map(x=>[String(x.id),x]));
-  base.friends.forEach(f=>{
-    const row=byId.get(String(f.id));
-    if(row&&Array.isArray(row.chat))f.chat=row.chat;
-  });
-  return base;
-}
-function readLegacyState(dbName){
-  return new Promise(resolve=>{
-    let r;
-    try{r=indexedDB.open(dbName,1)}catch(e){return resolve(null)}
-    r.onupgradeneeded=()=>{};
-    r.onsuccess=()=>{
-      const oldDb=r.result;
-      if(!oldDb.objectStoreNames.contains('state')){try{oldDb.close()}catch(e){};return resolve(null)}
-      try{
-        const q=oldDb.transaction('state','readonly').objectStore('state').get('state');
-        q.onsuccess=()=>{const v=q.result;try{oldDb.close()}catch(e){};resolve(extractStored(v))};
-        q.onerror=()=>{try{oldDb.close()}catch(e){};resolve(null)};
-      }catch(e){try{oldDb.close()}catch(e){};resolve(null)}
-    };
-    r.onerror=()=>resolve(null);
-  });
-}
-function readLegacyChats(dbName){
-  return new Promise(resolve=>{
-    let r;
-    try{r=indexedDB.open(dbName,1)}catch(e){return resolve(null)}
-    r.onupgradeneeded=()=>{};
-    r.onsuccess=()=>{
-      const oldDb=r.result;
-      if(!oldDb.objectStoreNames.contains('chats')){try{oldDb.close()}catch(e){};return resolve(null)}
-      try{
-        const q=oldDb.transaction('chats','readonly').objectStore('chats').getAll();
-        q.onsuccess=()=>{const v=q.result;try{oldDb.close()}catch(e){};resolve(Array.isArray(v)?v:null)};
-        q.onerror=()=>{try{oldDb.close()}catch(e){};resolve(null)};
-      }catch(e){try{oldDb.close()}catch(e){};resolve(null)}
-    };
-    r.onerror=()=>resolve(null);
-  });
-}
-async function readV4Chats(){
-  if(!db||!db.objectStoreNames.contains(CHAT_STORE))return null;
-  return new Promise(resolve=>{
-    try{
-      const q=db.transaction(CHAT_STORE,'readonly').objectStore(CHAT_STORE).getAll();
-      q.onsuccess=()=>resolve(Array.isArray(q.result)?q.result:null);
-      q.onerror=()=>resolve(null);
-    }catch(e){resolve(null)}
-  });
-}
+function unwrapState(x){if(!x)return null;if(x.state&&typeof x.savedAt==='number')return x;return {savedAt:Number(x._persistedAt)||0,state:x}}
+function mergeChats(base,rows){if(!base||!Array.isArray(base.friends)||!Array.isArray(rows))return base;const map=new Map(rows.map(x=>[String(x.id),x]));base.friends.forEach(f=>{const r=map.get(String(f.id));if(r&&Array.isArray(r.chat))f.chat=r.chat});return base}
+function readLegacyDB(name){return new Promise(resolve=>{
+  let r;try{r=indexedDB.open(name)}catch(e){return resolve(null)}
+  r.onsuccess=()=>{
+    const d=r.result,out={state:null,chats:null};
+    let pending=1+(d.objectStoreNames.contains(CHAT_STORE)?1:0);
+    const done=()=>{if(--pending===0){try{d.close()}catch(e){}resolve(out)}};
+    if(d.objectStoreNames.contains(STORE)){try{const q=d.transaction(STORE,'readonly').objectStore(STORE).get('state');q.onsuccess=()=>{out.state=unwrapState(q.result);done()};q.onerror=()=>done()}catch(e){done()}}else done();
+    if(d.objectStoreNames.contains(CHAT_STORE)){try{const q=d.transaction(CHAT_STORE,'readonly').objectStore(CHAT_STORE).getAll();q.onsuccess=()=>{out.chats=Array.isArray(q.result)?q.result:null;done()};q.onerror=()=>done()}catch(e){done()}}
+  };
+  r.onerror=()=>resolve(null);
+})}
+function readCurrentChats(){return new Promise(resolve=>{if(!db||!db.objectStoreNames.contains(CHAT_STORE))return resolve(null);try{const q=db.transaction(CHAT_STORE,'readonly').objectStore(CHAT_STORE).getAll();q.onsuccess=()=>resolve(Array.isArray(q.result)?q.result:null);q.onerror=()=>resolve(null)}catch(e){resolve(null)}})}
 async function initDB(){
-  const freshBackup=readBackup();
-  const legacyBackupV3=readOlderBackup('simple_chat_state_backup_v3');
-  const legacyBackupV2=readOlderBackup('simple_chat_state_backup_v2');
-  const chatBackup=readChatBackup();
-  if(!window.indexedDB){
-    const candidates=[freshBackup,legacyBackupV3,legacyBackupV2].filter(Boolean);
-    candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
-    state=candidates[0]?.state||clone(defaults);
-    if(chatBackup&&(chatBackup.savedAt||0)>(candidates[0]?.savedAt||0))mergeChatBackup(state,chatBackup);
-    normalizeState();return;
+  const local5=readLocal(BACKUP_KEY), local4=readLocal('simple_chat_state_backup_v4'), local3=readLocal('simple_chat_state_backup_v3'), local2=readLocal('simple_chat_state_backup_v2'), chatLocal=readChatLocal();
+  let current=null,currentChats=null;
+  if(window.indexedDB){
+    await new Promise(resolve=>{let r;try{r=indexedDB.open(DB,1)}catch(e){return resolve()};r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains(STORE))d.createObjectStore(STORE);if(!d.objectStoreNames.contains(CHAT_STORE))d.createObjectStore(CHAT_STORE,{keyPath:'id'})};r.onsuccess=()=>{db=r.result;db.onversionchange=()=>{try{db.close()}catch(e){}};try{const q=db.transaction(STORE,'readonly').objectStore(STORE).get('state');q.onsuccess=async()=>{current=unwrapState(q.result);currentChats=await readCurrentChats();resolve()};q.onerror=()=>resolve()}catch(e){resolve()}};r.onerror=()=>resolve();r.onblocked=()=>resolve()});
   }
-  let r;
-  try{r=indexedDB.open(DB,2)}catch(e){
-    const old3=await readLegacyState('simple_chat_v3');
-    const old2=await readLegacyState('simple_chat_v2');
-    const candidates=[freshBackup,legacyBackupV3,legacyBackupV2,old3,old2].filter(Boolean);
-    candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
-    state=candidates[0]?.state||clone(defaults);
-    if(chatBackup&&(chatBackup.savedAt||0)>(candidates[0]?.savedAt||0))mergeChatBackup(state,chatBackup);
-    normalizeState();return;
-  }
-  await new Promise(resolve=>{
-    r.onupgradeneeded=()=>{
-      const d=r.result;
-      if(!d.objectStoreNames.contains(STORE))d.createObjectStore(STORE);
-      if(!d.objectStoreNames.contains(CHAT_STORE))d.createObjectStore(CHAT_STORE,{keyPath:'id'});
-    };
-    r.onsuccess=async()=>{
-      db=r.result;
-      db.onversionchange=()=>{try{db.close()}catch(e){}};
-      let dbSnap=null, chatRows=null;
-      try{
-        if(db.objectStoreNames.contains(STORE)){
-          const q=db.transaction(STORE,'readonly').objectStore(STORE).get('state');
-          q.onsuccess=async()=>{
-            dbSnap=extractStored(q.result);
-            chatRows=await readV4Chats();
-            const old3=dbSnap?null:await readLegacyState('simple_chat_v3');
-            const old2=dbSnap?null:await readLegacyState('simple_chat_v2');
-            const oldChats=dbSnap?null:await readLegacyChats('simple_chat_v3');
-            const candidates=[freshBackup,legacyBackupV3,legacyBackupV2,dbSnap,old3,old2].filter(Boolean);
-            candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
-            const newest=candidates[0];
-            state=newest?.state||clone(defaults);
-            const chatTimes=[
-              chatBackup?{savedAt:chatBackup.savedAt||0,type:'local',data:chatBackup}:null,
-              chatRows&&chatRows.length?{savedAt:Math.max(...chatRows.map(x=>Number(x.savedAt)||0)),type:'idb',data:chatRows}:null,
-              oldChats&&oldChats.length?{savedAt:Math.max(...oldChats.map(x=>Number(x.savedAt)||0)),type:'idb',data:oldChats}:null
-            ].filter(Boolean).sort((a,b)=>b.savedAt-a.savedAt);
-            const latestChat=chatTimes[0];
-            if(latestChat && latestChat.savedAt>(newest?.savedAt||0)){
-              if(latestChat.type==='local') mergeChatBackup(state,latestChat.data);
-              else mergeChatRows(state,latestChat.data);
-            } else if(latestChat && latestChat.type==='idb'){
-              mergeChatRows(state,latestChat.data);
-            }
-            normalizeState();
-            save().then(resolve);
-          };
-          q.onerror=async()=>{
-            const old3=await readLegacyState('simple_chat_v3');
-            const old2=await readLegacyState('simple_chat_v2');
-            const candidates=[freshBackup,legacyBackupV3,legacyBackupV2,old3,old2].filter(Boolean);
-            candidates.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
-            state=candidates[0]?.state||clone(defaults);
-            if(chatBackup&&(chatBackup.savedAt||0)>(candidates[0]?.savedAt||0))mergeChatBackup(state,chatBackup);
-            normalizeState();save().then(resolve);
-          };
-        } else {
-          state=(freshBackup||legacyBackupV3||legacyBackupV2)?.state||clone(defaults);
-          normalizeState();save().then(resolve);
-        }
-      }catch(e){
-        state=(freshBackup||legacyBackupV3||legacyBackupV2)?.state||clone(defaults);
-        normalizeState();save().then(resolve);
-      }
-    };
-    r.onerror=()=>resolve();
-    r.onblocked=()=>resolve();
-  });
-  if(!state){state=clone(defaults);normalizeState()}
+  const legacyNames=['simple_chat_v4','simple_chat_v3','simple_chat_v2','simple_chat_v1'];
+  const legacy=await Promise.all(legacyNames.map(n=>readLegacyDB(n)));
+  const candidates=[local5,local4,local3,local2,current,...legacy.map(x=>x?.state)].filter(Boolean);
+  candidates.sort((a,b)=>(Number(b.savedAt)||0)-(Number(a.savedAt)||0));
+  state=candidates[0]?.state||clone(defaults);
+  const chatCandidates=[];
+  if(chatLocal)chatCandidates.push({savedAt:Number(chatLocal.savedAt)||0,rows:chatLocal.friends});
+  if(currentChats?.length)chatCandidates.push({savedAt:Math.max(...currentChats.map(x=>Number(x.savedAt)||0)),rows:currentChats});
+  legacy.forEach(x=>{if(x?.chats?.length)chatCandidates.push({savedAt:Math.max(...x.chats.map(y=>Number(y.savedAt)||0)),rows:x.chats})});
+  chatCandidates.sort((a,b)=>b.savedAt-a.savedAt);
+  if(chatCandidates[0]&&chatCandidates[0].savedAt>(Number(candidates[0]?.savedAt)||0))mergeChats(state,chatCandidates[0].rows);
+  normalizeState();
+  await save();
 }
-function save(){
-  return new Promise(res=>{
-    const stamp=Date.now();
-    const backupOk=writeBackup();
-    if(!db){res(backupOk);return}
-    let stateDone=false,chatDone=false;
-    const finish=()=>{if(stateDone&&chatDone)res(true)};
-    try{
-      const tx=db.transaction(STORE,'readwrite');
-      const q=tx.objectStore(STORE).put({savedAt:stamp,state},'state');
-      q.onsuccess=()=>{stateDone=true;finish()};
-      q.onerror=()=>{stateDone=true;finish()};
-      tx.onabort=()=>{stateDone=true;finish()};
-      tx.onerror=()=>{stateDone=true;finish()};
-    }catch(e){stateDone=true;finish()}
-    try{
-      const tx2=db.transaction(CHAT_STORE,'readwrite');
-      const store=tx2.objectStore(CHAT_STORE);
-      (state.friends||[]).forEach(f=>{
-        store.put({id:f.id,savedAt:stamp,chat:Array.isArray(f.chat)?f.chat:[]});
-      });
-      tx2.oncomplete=()=>{chatDone=true;finish()};
-      tx2.onerror=()=>{chatDone=true;finish()};
-      tx2.onabort=()=>{chatDone=true;finish()};
-    }catch(e){chatDone=true;finish()}
-    // 任一 IndexedDB 分支异常时，本地同步快照仍然已经写入。
-    setTimeout(()=>{if(!stateDone)stateDone=true;if(!chatDone)chatDone=true;finish()},1500);
-  });
-}
-function persistBeforeExit(){try{writeBackup(); if(db) (state.friends||[]).forEach(f=>{try{const tx=db.transaction(CHAT_STORE,'readwrite');tx.objectStore(CHAT_STORE).put({id:f.id,savedAt:Date.now(),chat:Array.isArray(f.chat)?f.chat:[]})}catch(e){}})}catch(e){}}
+function save(){return new Promise(resolve=>{
+  const stamp=Date.now();writeBackup();
+  if(!db)return resolve(true);
+  let a=false,b=false,finish=()=>{if(a&&b)resolve(true)};
+  try{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({savedAt:stamp,state},'state');tx.oncomplete=()=>{a=true;finish()};tx.onerror=()=>{a=true;finish()};tx.onabort=()=>{a=true;finish()}}catch(e){a=true}
+  try{const tx=db.transaction(CHAT_STORE,'readwrite'),s=tx.objectStore(CHAT_STORE);(state.friends||[]).forEach(f=>s.put({id:f.id,savedAt:stamp,chat:Array.isArray(f.chat)?f.chat:[]}));tx.oncomplete=()=>{b=true;finish()};tx.onerror=()=>{b=true;finish()};tx.onabort=()=>{b=true;finish()}}catch(e){b=true}
+  setTimeout(()=>{a=true;b=true;finish()},1200);
+})}
+function persistBeforeExit(){try{writeBackup()}catch(e){}}
 window.addEventListener('pagehide',persistBeforeExit);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persistBeforeExit()});
-
 function $(id){return document.getElementById(id)}
 function showPage(id){
   if(id!=='moments')momentReplyTarget=null;
@@ -2244,14 +2122,25 @@ function backupChats(){
   let payload={kind:'chats',version:2,exportedAt:new Date().toISOString(),friends:state.friends.map(f=>({id:f.id,name:f.name,uid:f.uid,avatar:f.avatar,chat:f.chat||[]})),surveyHistory:state.surveyHistory||[]};
   downloadText(JSON.stringify(payload,null,2),tsName('聊天记录备份'));showToast('聊天记录已备份');
 }
+function parseBackupText(raw){
+  let t=String(raw||'').replace(/^\uFEFF/,'').trim();
+  if(t.startsWith('```')){t=t.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim()}
+  let x=JSON.parse(t);
+  // 兼容旧版/中间版备份：可能被包在 state / data / backup 中
+  if(x&&x.state&&typeof x.state==='object'&&!x.kind&&!x.friends&&!x.cards) x=x.state;
+  if(x&&x.data&&typeof x.data==='object'&&!x.kind&&!x.friends&&!x.cards) x=x.data;
+  if(x&&x.backup&&typeof x.backup==='object'&&!x.kind&&!x.friends&&!x.cards) x=x.backup;
+  return x;
+}
 function restoreBackup(){
-  let input=document.createElement('input');input.type='file';input.accept='.json,application/json';
+  let input=document.createElement('input');input.type='file';input.accept='.json,.txt,application/json,text/plain';
   input.onchange=()=>{let f=input.files&&input.files[0];if(!f)return;let r=new FileReader();
-    r.onload=()=>{try{let x=JSON.parse(r.result);
-      let kind=x.kind||(x.friends&&x.cards?'full':(x.cards?'cards':(x.friends?'chats':'')));
-      if(kind==='full')restoreAll(x);else if(kind==='cards')restoreCards(x);else if(kind==='chats')restoreChats(x);else showToast('无法识别');
-    }catch(e){showToast('格式不正确')}};
-    r.readAsText(f)};
+    r.onload=()=>{try{let x=parseBackupText(r.result);
+      let kind=x&&x.kind||(x&&x.friends&&x.cards?'full':(x&&x.cards?'cards':(x&&x.friends?'chats':'')));
+      if(kind==='full')restoreAll(x);else if(kind==='cards')restoreCards(x);else if(kind==='chats')restoreChats(x);
+      else showToast('无法识别此备份文件');
+    }catch(e){console.error('backup restore parse error',e);showToast('JSON 解析失败，请选择网站导出的备份文件')}};
+    r.readAsText(f,'utf-8')};
   input.click();
 }
 function restoreAll(x){
