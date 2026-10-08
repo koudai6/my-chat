@@ -578,3 +578,55 @@
 
   console.log('✅ save 已恢复为立即写入，不再丢数据');
 })();
+// ====== 删除操作应急保存（localStorage 同步写入） ======
+(function(){
+  if (window.__emergencySave) return;
+  window.__emergencySave = true;
+
+  // 同步写一份到 localStorage（应急备份）
+  function emergencySave() {
+    try {
+      localStorage.setItem('__emergency_state', JSON.stringify(state));
+    } catch(e) {
+      console.log('应急保存失败（数据太大）:', e);
+    }
+  }
+
+  // 启动时检查应急备份，如果存在就恢复
+  function checkEmergency() {
+    try {
+      const s = localStorage.getItem('__emergency_state');
+      if (!s) return;
+      const parsed = JSON.parse(s);
+      // 用应急版本覆盖当前 state（应急版本是最新的）
+      Object.keys(parsed).forEach(k => { state[k] = parsed[k]; });
+      localStorage.removeItem('__emergency_state');
+      // 写回 IndexedDB
+      if (typeof save === 'function') save();
+      console.log('✅ 已从应急备份恢复');
+    } catch(e) {
+      console.log('应急恢复失败:', e);
+      localStorage.removeItem('__emergency_state');
+    }
+  }
+
+  // 拦截所有删除相关的函数
+  ['confirmMsgDelete', 'confirmDeleteCard', 'confirmDeleteMomentPost', 'confirmDeleteMomentComment'].forEach(function(fnName) {
+    const orig = window[fnName];
+    if (typeof orig !== 'function') return;
+    window[fnName] = function() {
+      const r = orig.apply(this, arguments);
+      // 立即同步保存
+      setTimeout(function() {
+        emergencySave();
+      }, 0);
+      return r;
+    };
+  });
+
+  // 应用初始化后检查应急备份（延时确保 state 已加载）
+  setTimeout(checkEmergency, 1500);
+  setTimeout(checkEmergency, 3000);
+
+  console.log('✅ 删除应急保存已启用');
+})();
