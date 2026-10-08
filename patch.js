@@ -689,3 +689,35 @@
   setTimeout(apply, 4000);
   console.log('✅ v31 删除持久化已启用');
 })();
+// ====== 修复：save 立即写盘（不改 core.js） ======
+(function(){
+  if (window.__saveDirect) return;
+  window.__saveDirect = true;
+
+  // 等 db 和 state 都就绪后再替换 save
+  function tryOverride() {
+    if (typeof db === 'undefined' || !db || typeof state === 'undefined' || !state) {
+      setTimeout(tryOverride, 500);
+      return;
+    }
+
+    // 直接操作 IndexedDB，每次调用立即写入
+    window.save = function() {
+      return new Promise(function(resolve) {
+        try {
+          const tx = db.transaction(STORE, 'readwrite');
+          tx.objectStore(STORE).put(state, 'state');
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { resolve(); };
+          tx.onabort = function() { resolve(); };
+        } catch(e) {
+          resolve();
+        }
+      });
+    };
+
+    console.log('✅ save 已替换为立即写入版');
+  }
+
+  tryOverride();
+})();
