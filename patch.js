@@ -26,7 +26,105 @@
     window._pendingQueue = window._pendingQueue || [];
     renderQueuePanel();
   };
+// ====== 图片点击放大 + 队列优化 ======
+(function(){
+  if (window.__imgZoom) return;
+  window.__imgZoom = true;
 
+  // 1. 点击图片直接放大，长按弹操作菜单
+  document.addEventListener('click', function(e){
+    const img = e.target.closest('#bubbles .bubble img.sticker, #bubbles .bubble img.chatImg');
+    if (!img) return;
+    const cp = document.getElementById('chat');
+    if (!cp || !cp.classList.contains('active')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    const src = img.src;
+    if (src && typeof viewImage === 'function') viewImage(src);
+  }, true);
+
+  // 长按图片 → 弹操作菜单
+  let longPressTimer = null;
+  let longPressTriggered = false;
+  document.addEventListener('touchstart', function(e){
+    const img = e.target.closest('#bubbles .bubble img.sticker, #bubbles .bubble img.chatImg');
+    if (!img) return;
+    longPressTriggered = false;
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(function(){
+      longPressTriggered = true;
+      // 触发原本的菜单（找到父级 .bubble 的 data-idx）
+      const bubble = img.closest('.bubble[data-idx]');
+      if (!bubble) return;
+      const idx = +bubble.getAttribute('data-idx');
+      if (isNaN(idx)) return;
+      if (typeof showMsgActions === 'function') showMsgActions(idx);
+    }, 600);
+  }, {passive: true, capture: true});
+  document.addEventListener('touchend', function(){ clearTimeout(longPressTimer); }, true);
+  document.addEventListener('touchmove', function(){ clearTimeout(longPressTimer); }, true);
+
+  // 拦截 click 里对图片的菜单弹出（长按已覆盖）
+  document.addEventListener('click', function(e){
+    if (longPressTriggered) { longPressTriggered = false; }
+  }, true);
+
+  // 2. 队列发送优化：改 save 为节流，间隔改为 400ms
+  window.sendQueueAll = function() {
+    if (!window._pendingQueue || !window._pendingQueue.length) { showToast('队列为空'); return; }
+    if (!currentFriend) { showToast('请先进入聊天'); return; }
+
+    const friend = currentFriend;
+    const queue = window._pendingQueue.slice();
+    window._pendingQueue = [];
+    closeModal();
+
+    // 先暂停原本的定时器
+    clearTimeout(friend._cardTimer);
+    clearTimeout(friend._typingTimer);
+
+    let i = 0;
+    function sendNext() {
+      if (i >= queue.length) {
+        // 发送完成，触发一次字卡回复
+        const cs = state.chatSettings || {};
+        const min = Math.max(1, +cs.min || 30);
+        const max = Math.max(min, +cs.max || 120);
+        const delay = (min + Math.random() * (max - min)) * 1000;
+        friend._typing = true;
+        if (friend === currentFriend) renderBubbles();
+        friend._typingTimer = setTimeout(function(){
+          if (currentFriend !== friend) return;
+          friend._typing = false;
+          if (typeof runCardPopup === 'function') runCardPopup(friend);
+        }, delay);
+        if (typeof save === 'function') save();
+        return;
+      }
+
+      const item = queue[i];
+      const msg = { who:'me', text: item.text || '', time: Date.now() };
+      if (item.image) { msg.image = item.image; msg.text = '[图片/表情包]'; }
+      friend.chat.push(msg);
+
+      // 用 core.js 里的追加函数（只追加一条，不重建）
+      if (typeof window.appendMyBubble === 'function') {
+        window.appendMyBubble(msg, friend.chat.length - 1);
+      } else if (friend === currentFriend) {
+        renderBubbles();
+      }
+
+      i++;
+      // 间隔改成 450ms，一条一条弹，但不会卡
+      setTimeout(sendNext, 450);
+    }
+
+    sendNext();
+  };
+
+  console.log('✅ 图片放大 + 队列优化已加载');
+})();
   // 3. 渲染队列面板（可重复调用刷新）
   window.renderQueuePanel = function() {
     if (!currentFriend) return;
