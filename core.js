@@ -83,40 +83,6 @@ window.openChat = function(id) {
     doSend();
   }, true);
 })();
-
-// 3. save 节流
-(function(){
-  if (window.__saveThrottle) return;
-  window.__saveThrottle = true;
-  const origSave = window.save;
-  let timer = null, pool = [];
-  window.save = function() {
-    return new Promise(function(res){
-      pool.push(res);
-      if (timer) return;
-      timer = setTimeout(function(){
-        timer = null;
-        const rs = pool.slice(); pool = [];
-        try {
-          const p = origSave ? origSave() : null;
-          if (p && p.then) p.then(()=>rs.forEach(r=>r())).catch(()=>rs.forEach(r=>r()));
-          else rs.forEach(r=>r());
-        } catch(e) { rs.forEach(r=>r()); }
-      }, 2000);
-    });
-  };
-  function flush() {
-    if (!timer) return;
-    clearTimeout(timer); timer = null;
-    try { if (origSave) origSave(); } catch(e){}
-    const rs = pool.slice(); pool = [];
-    rs.forEach(r=>r());
-  }
-  document.addEventListener('visibilitychange', function(){ if (document.hidden) flush(); });
-  window.addEventListener('pagehide', flush);
-  window.addEventListener('beforeunload', flush);
-})();
-
 // 4. 锁横向滑动
 (function() {
   const s = document.createElement('style');
