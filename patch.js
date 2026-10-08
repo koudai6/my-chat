@@ -721,3 +721,44 @@
 
   tryOverride();
 })();
+// ====== 诊断版 save：右下角绿点 ======
+(function(){
+  if (window.__diagSave) return;
+  window.__diagSave = true;
+
+  function install() {
+    if (typeof db === 'undefined' || !db) {
+      setTimeout(install, 500);
+      return;
+    }
+
+    window.save = function() {
+      // 右下角绿点，闪一下表示 save 被调用
+      let dot = document.getElementById('__save_dot');
+      if (!dot) {
+        dot = document.createElement('div');
+        dot.id = '__save_dot';
+        dot.style.cssText = 'position:fixed;right:10px;bottom:10px;width:12px;height:12px;border-radius:50%;background:#34c759;z-index:99999;opacity:0;transition:opacity .3s;pointer-events:none;';
+        document.body.appendChild(dot);
+      }
+      dot.style.opacity = '1';
+      clearTimeout(dot._t);
+      dot._t = setTimeout(function(){ dot.style.opacity = '0'; }, 600);
+
+      // 立即写 IndexedDB
+      return new Promise(function(resolve) {
+        try {
+          const tx = db.transaction(STORE, 'readwrite');
+          tx.objectStore(STORE).put(state, 'state');
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { resolve(); };
+          tx.onabort = function() { resolve(); };
+        } catch(e) { resolve(); }
+      });
+    };
+
+    console.log('✅ 诊断版 save 已启用');
+  }
+
+  install();
+})();
