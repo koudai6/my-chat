@@ -272,4 +272,71 @@
 
   console.log('✅ 消息队列功能已加载');
 })();
-   
+   // ====== 图片放大（直接绑定版） ======
+(function(){
+  if (window.__imgZoomV2) return;
+  window.__imgZoomV2 = true;
+
+  // 给一张图片元素绑定事件
+  function bindImg(img) {
+    if (img._zoomBound) return;
+    img._zoomBound = true;
+
+    // 阻止父级气泡抢走点击
+    img.style.cursor = 'zoom-in';
+
+    img.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      const src = img.src;
+      if (src && typeof viewImage === 'function') viewImage(src);
+    }, true);
+
+    // 长按 → 弹操作菜单
+    let timer = null;
+    let triggered = false;
+    img.addEventListener('touchstart', function(e) {
+      triggered = false;
+      clearTimeout(timer);
+      timer = setTimeout(function() {
+        triggered = true;
+        const bubble = img.closest('.bubble[data-idx]');
+        if (!bubble) return;
+        const idx = +bubble.getAttribute('data-idx');
+        if (isNaN(idx)) return;
+        if (typeof showMsgActions === 'function') showMsgActions(idx);
+      }, 600);
+    }, { passive: true, capture: true });
+
+    img.addEventListener('touchend', function() { clearTimeout(timer); }, true);
+    img.addEventListener('touchmove', function() { clearTimeout(timer); }, true);
+    img.addEventListener('touchcancel', function() { clearTimeout(timer); }, true);
+  }
+
+  // 扫描所有图片并绑定
+  function scanAll() {
+    const bubbles = document.getElementById('bubbles');
+    if (!bubbles) return;
+    bubbles.querySelectorAll('img').forEach(bindImg);
+  }
+
+  // 每 300ms 扫一次，保证新出现的图片也能绑定
+  setInterval(scanAll, 300);
+  setTimeout(scanAll, 500);
+
+  // 也用 MutationObserver 立即响应
+  function attachObserver() {
+    const bubbles = document.getElementById('bubbles');
+    if (!bubbles || bubbles._imgObs) return;
+    bubbles._imgObs = true;
+    const obs = new MutationObserver(function() {
+      bubbles.querySelectorAll('img').forEach(bindImg);
+    });
+    obs.observe(bubbles, { childList: true, subtree: true });
+  }
+  setTimeout(attachObserver, 800);
+  setInterval(attachObserver, 2000);
+
+  console.log('✅ 图片放大已加载（直接绑定版）');
+})();
