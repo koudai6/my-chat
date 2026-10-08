@@ -762,3 +762,74 @@
 
   install();
 })();
+// ====== 双保险保存：IndexedDB + localStorage ======
+(function(){
+  if (window.__dualSave) return;
+  window.__dualSave = true;
+  const LS_KEY = '__chat_friends';
+
+  function install() {
+    if (typeof db === 'undefined' || !db) { setTimeout(install, 500); return; }
+    if (!window.state) { setTimeout(install, 500); return; }
+
+    const origSave = window.save;
+
+    window.save = function() {
+      // 1. 先同步写 localStorage（保证不丢）
+      try {
+        const slim = {
+          ts: Date.now(),
+          friends: state.friends.map(function(f){
+            return { id: f.id, name: f.name, chat: f.chat || [] };
+          })
+        };
+        localStorage.setItem(LS_KEY, JSON.stringify(slim));
+      } catch(e) {
+        console.log('localStorage 写入失败:', e);
+      }
+
+      // 2. 再异步写 IndexedDB
+      return origSave ? origSave() : Promise.resolve();
+    };
+
+    setTimeout(restore, 2500);
+  }
+
+  function restore() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const backup = JSON.parse(raw);
+      if (!backup || !Array.isArray(backup.friends)) return;
+
+      let changed = false;
+      backup.friends.forEach(function(bf){
+        const cf = state.friends.find(function(f){ return String(f.id) === String(bf.id); });
+        if (!cf) return;
+        const bChat = bf.chat || [];
+        const cChat = cf.chat || [];
+        const bLast = bChat.length ? (bChat[bChat.length-1].time || 0) : 0;
+        const cLast = cChat.length ? (cChat[cChat.length-1].time || 0) : 0;
+        if (bChat.length > cChat.length || bLast > cLast) {
+          cf.chat = bChat;
+          if (bf.name) cf.name = bf.name;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        if (typeof save === 'function') save();
+        if (typeof renderChats === 'function') renderChats();
+        if (typeof currentFriend !== 'undefined' && currentFriend) {
+          if (typeof renderBubbles === 'function') renderBubbles();
+        }
+        console.log('✅ 从 localStorage 恢复了最新消息');
+      }
+    } catch(e) {
+      console.log('恢复失败:', e);
+    }
+  }
+
+  install();
+  console.log('✅ 双保险保存已启用');
+})();
