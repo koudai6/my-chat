@@ -405,3 +405,82 @@
 
   console.log('✅ 聊天懒加载已启用');
 })();
+// ====== v30：聊天快速打开（终极版） ======
+(function(){
+  if (window.__fastOpenFinal) return;
+  window.__fastOpenFinal = true;
+
+  const LIMIT = 100;
+
+  // 抓当前生效的 renderBubbles（不管它是原版还是之前被覆盖过的版本）
+  const baseRender = window.renderBubbles;
+
+  window.renderBubbles = function() {
+    if (typeof currentFriend === 'undefined' || !currentFriend) {
+      if (baseRender) baseRender.apply(this, arguments);
+      return;
+    }
+    const chat = currentFriend.chat;
+    if (!Array.isArray(chat)) {
+      if (baseRender) baseRender.apply(this, arguments);
+      return;
+    }
+
+    const needLimit = chat.length > LIMIT;
+    const origForEach = chat.forEach;
+
+    if (needLimit) {
+      const start = chat.length - LIMIT;
+      // 临时替换 forEach，只遍历最后 100 条，但保持真实索引
+      chat.forEach = function(fn) {
+        for (let i = start; i < chat.length; i++) fn(chat[i], i, chat);
+      };
+    }
+
+    try {
+      if (baseRender) baseRender.apply(this, arguments);
+    } finally {
+      if (needLimit) chat.forEach = origForEach;
+    }
+
+    // 顶部加"查看全部"按钮
+    if (needLimit) {
+      setTimeout(function(){
+        const b = document.getElementById('bubbles');
+        if (!b) return;
+        if (b.querySelector('.viewAllBtn')) return;
+        const btn = document.createElement('button');
+        btn.className = 'viewAllBtn';
+        btn.style.cssText = 'display:block;margin:10px auto;padding:8px 16px;background:#f0f0f4;color:#666;border:0;border-radius:14px;font-size:.78rem;cursor:pointer;font-family:inherit;';
+        btn.textContent = '查看全部聊天记录（共 ' + chat.length + ' 条）';
+        btn.onclick = function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+          window.__showAllHistory();
+        };
+        b.insertBefore(btn, b.firstChild);
+      }, 0);
+    }
+  };
+
+  window.__showAllHistory = function() {
+    if (typeof currentFriend === 'undefined' || !currentFriend) return;
+    const chat = currentFriend.chat;
+    let html = '<div style="max-height:60vh;overflow-y:auto;background:#f6f6f8;border-radius:12px;padding:10px;font-size:.82rem;line-height:1.6">';
+    chat.forEach(function(m){
+      const who = m.who === 'me' ? '我' : (currentFriend.name || '对方');
+      let content;
+      if (m.image) content = '<img src="' + m.image + '" style="max-width:80px;border-radius:8px;display:block;margin-top:4px">';
+      else content = (typeof esc === 'function') ? esc(m.text || '') : String(m.text || '');
+      html += '<div style="padding:6px 0;border-bottom:1px solid #ececf0;word-break:break-word">' +
+        '<b>' + (typeof esc === 'function' ? esc(who) : who) + '</b>：' + content +
+        '</div>';
+    });
+    html += '</div>';
+    html += '<button class="action secondary" style="margin-top:12px" onclick="closeModal()">关闭</button>';
+    if (typeof modal === 'function') modal('全部聊天记录', html);
+  };
+
+  console.log('✅ v30 聊天快速打开已启用');
+})();
