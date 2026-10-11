@@ -48,19 +48,19 @@ button,input,textarea,select{font:inherit;font-family:inherit}button{border:0;ba
 
 .bubbles{display:flex;flex-direction:column;gap:6px;padding:10px 2px;background-size:cover;background-position:center;background-repeat:no-repeat}
 .bubbles.hasBg{background-color:transparent}
-.bubbleRow{display:flex;gap:7px;align-items:flex-start}
+.bubbleRow{display:flex;gap:7px;align-items:flex-start;min-width:0;width:100%;box-sizing:border-box}
 .bubbleRow.me{justify-content:flex-end}
-.msgWrap{display:flex;flex-direction:column;max-width:68%}
-.me .msgWrap{align-items:flex-end}
+.msgWrap{display:flex;flex-direction:column;min-width:0;width:calc(100% - 39px);max-width:75%;flex:0 1 auto}
+.me .msgWrap{align-items:flex-end;min-width:0}
 .avatarCol{display:flex;flex-direction:column;align-items:center;flex:none;width:32px}
 .avatarCol .bubbleMeta{font-size:.52rem;color:#b8b8c0;margin-top:3px;text-align:center;line-height:1.2;width:100%}
-.bubble{max-width:100%;padding:6px 10px;border-radius:14px;background:#ffffff;line-height:1.38;font-size:.85rem;word-break:break-word;box-shadow:0 1px 6px rgba(0,0,0,.045),0 1px 2px rgba(0,0,0,.02)}
+.bubble{box-sizing:border-box;min-width:0;max-width:100%;padding:6px 10px;border-radius:14px;background:#ffffff;line-height:1.38;font-size:.85rem;white-space:normal;overflow-wrap:anywhere;word-break:break-word;box-shadow:0 1px 6px rgba(0,0,0,.045),0 1px 2px rgba(0,0,0,.02)}
 .me .bubble{background:#ffffff}
 .bubble img.sticker{display:block;max-width:84px;max-height:84px;border-radius:10px;cursor:pointer}
 .bubble.stickerBubble{background:transparent!important;box-shadow:none!important;padding:0!important;border-radius:0}
 .bubble.stickerBubble .quoteBubble{margin-bottom:4px;background:#f6f6f8;padding:2px 6px;border-radius:5px}
 .bubble img.chatImg{display:block;max-width:84px;max-height:84px;border-radius:10px;cursor:pointer;object-fit:cover}
-.quoteBubble{background:#f6f6f8;border-left:3px solid #d0d0d6;border-radius:5px;padding:2px 6px;font-size:.7rem;color:#666;margin-bottom:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quoteBubble{box-sizing:border-box;background:#f6f6f8;border-left:3px solid #d0d0d6;border-radius:5px;padding:2px 6px;font-size:.7rem;color:#666;margin-bottom:2px;width:100%;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .bubble.typing{padding:6px 10px;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:auto;min-width:48px}
 .imgViewer{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
 .imgViewer img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
@@ -489,20 +489,26 @@ async function initDB(){
   legacy.forEach(x=>{if(x?.chats?.length)chatCandidates.push({savedAt:Math.max(...x.chats.map(y=>Number(y.savedAt)||0)),rows:x.chats})});
   // Only merge a dedicated snapshot when it is newer; old slim backups are used for image recovery only.
   chatCandidates.sort((a,b)=>b.savedAt-a.savedAt);
+  // Merge chat rows only when their snapshot is newer; page-exit no longer manufactures
+  // a newer full-state timestamp without actually saving state changes.
   if(chatCandidates[0]&&chatCandidates[0].savedAt>(Number(candidates[0]?.savedAt)||0))mergeChats(state,chatCandidates[0].rows);
   recoverMissingChatImages(state,[currentChats,legacy.map(x=>x?.chats||[]),chatLocal?.friends,oldChatLocal?.friends]);
   normalizeState();
   await save();
 }
 function save(){return new Promise(resolve=>{
-  const stamp=Date.now();writeBackup();
+  const stamp=Date.now();
+  // localStorage backup is synchronous; retain it as a fallback before IndexedDB writes.
+  writeBackup();
   if(!db)return resolve(true);
-  let a=false,b=false,finish=()=>{if(a&&b)resolve(true)};
-  try{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({savedAt:stamp,state},'state');tx.oncomplete=()=>{a=true;finish()};tx.onerror=()=>{a=true;finish()};tx.onabort=()=>{a=true;finish()}}catch(e){a=true}
-  try{const tx=db.transaction(CHAT_STORE,'readwrite'),s=tx.objectStore(CHAT_STORE);(state.friends||[]).forEach(f=>s.put({id:f.id,savedAt:stamp,chat:Array.isArray(f.chat)?f.chat:[]}));tx.oncomplete=()=>{b=true;finish()};tx.onerror=()=>{b=true;finish()};tx.onabort=()=>{b=true;finish()}}catch(e){b=true}
-  setTimeout(()=>{a=true;b=true;finish()},1200);
+  let a=false,b=false,failed=false,settled=false;
+  const finish=()=>{if(settled||(!a&&!failed)||(!b&&!failed))return;if(failed){settled=true;resolve(false)}else if(a&&b){settled=true;resolve(true)}};
+  try{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({savedAt:stamp,state},'state');tx.oncomplete=()=>{a=true;finish()};tx.onerror=()=>{failed=true;finish()};tx.onabort=()=>{failed=true;finish()}}catch(e){failed=true;a=true;finish()}
+  try{const tx=db.transaction(CHAT_STORE,'readwrite'),s=tx.objectStore(CHAT_STORE);(state.friends||[]).forEach(f=>s.put({id:f.id,savedAt:stamp,chat:Array.isArray(f.chat)?f.chat:[]}));tx.oncomplete=()=>{b=true;finish()};tx.onerror=()=>{failed=true;finish()};tx.onabort=()=>{failed=true;finish()}}catch(e){failed=true;b=true;finish()}
 })}
-function persistBeforeExit(){try{writeBackup()}catch(e){}}
+// Save already writes a synchronous backup during each state change. Avoid creating a newer,
+// timestamp-only backup on pagehide/visibilitychange that could outrank the chat snapshot.
+function persistBeforeExit(){}
 window.addEventListener('pagehide',persistBeforeExit);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persistBeforeExit()});
 function $(id){return document.getElementById(id)}
@@ -1529,6 +1535,8 @@ function renderBubbles(){
   $('bubbles').innerHTML=h;
   bindStickerClicks();
   bindMsgActions();
+  // Reapply the selected decoration after every render, including delayed replies and new messages.
+  applyDecorationToChat();
   let b=$('bubbles');if(b)b.scrollTop=b.scrollHeight;
 }
 function now(){return Date.now()}
