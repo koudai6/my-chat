@@ -88,7 +88,7 @@ window.openChat = function(id) {
   const s = document.createElement('style');
   s.textContent = `
     #bubbles{overflow-x:hidden!important;touch-action:pan-y!important;overscroll-behavior-x:none!important;max-width:100%!important;width:100%!important}
-    #bubbles .bubbleRow,#bubbles .msgWrap,#bubbles .bubble{max-width:100%!important;min-width:0!important}
+    #bubbles .bubbleRow{max-width:100%!important;min-width:0!important}#bubbles .msgWrap{width:fit-content!important;max-width:min(75%,calc(100% - 39px))!important;min-width:0!important;flex:0 1 auto!important}#bubbles .bubble{max-width:100%!important;min-width:0!important}
     #bubbles img{max-width:100%!important;height:auto}
     html,body,.app{overflow-x:hidden!important;max-width:100vw!important}
   `;
