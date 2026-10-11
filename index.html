@@ -54,13 +54,13 @@ button,input,textarea,select{font:inherit;font-family:inherit}button{border:0;ba
 .me .msgWrap{align-items:flex-end;min-width:0}
 .avatarCol{display:flex;flex-direction:column;align-items:center;flex:none;width:32px}
 .avatarCol .bubbleMeta{font-size:.52rem;color:#b8b8c0;margin-top:3px;text-align:center;line-height:1.2;width:100%}
-.bubble{display:block;width:auto;min-width:0;max-width:100%;align-self:flex-start;box-sizing:border-box;padding:6px 10px;border-radius:14px;background:#ffffff;line-height:1.38;font-size:.85rem;white-space:normal;overflow-wrap:anywhere;word-break:break-word;box-shadow:0 1px 6px rgba(0,0,0,.045),0 1px 2px rgba(0,0,0,.02)}
-.me .bubble{background:#ffffff;align-self:flex-end}
+.bubble{display:block;width:fit-content;box-sizing:border-box;min-width:0;max-width:100%;padding:6px 10px;border-radius:14px;background:#ffffff;line-height:1.38;font-size:.85rem;white-space:normal;overflow-wrap:anywhere;word-break:break-word;box-shadow:0 1px 6px rgba(0,0,0,.045),0 1px 2px rgba(0,0,0,.02)}
+.me .bubble{background:#ffffff}
 .bubble img.sticker{display:block;max-width:84px;max-height:84px;border-radius:10px;cursor:pointer}
 .bubble.stickerBubble{background:transparent!important;box-shadow:none!important;padding:0!important;border-radius:0}
 .bubble.stickerBubble .quoteBubble{margin-bottom:4px;background:#f6f6f8;padding:2px 6px;border-radius:5px}
 .bubble img.chatImg{display:block;max-width:84px;max-height:84px;border-radius:10px;cursor:pointer;object-fit:cover}
-.quoteBubble{display:block;box-sizing:border-box;background:#f6f6f8;border-left:3px solid #d0d0d6;border-radius:5px;padding:2px 6px;font-size:.7rem;color:#666;margin-bottom:2px;width:100%;max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.quoteBubble{box-sizing:border-box;background:#f6f6f8;border-left:3px solid #d0d0d6;border-radius:5px;padding:2px 6px;font-size:.7rem;color:#666;margin-bottom:2px;width:100%;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .bubble.typing{padding:6px 10px;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:auto;min-width:48px}
 .imgViewer{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
 .imgViewer img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
@@ -498,13 +498,22 @@ async function initDB(){
 }
 function save(){return new Promise(resolve=>{
   const stamp=Date.now();
-  // localStorage backup is synchronous; retain it as a fallback before IndexedDB writes.
+  // Persist a synchronous fallback first, so closing the PWA cannot interrupt the backup write.
   writeBackup();
-  if(!db)return resolve(true);
-  let a=false,b=false,failed=false,settled=false;
-  const finish=()=>{if(settled||(!a&&!failed)||(!b&&!failed))return;if(failed){settled=true;resolve(false)}else if(a&&b){settled=true;resolve(true)}};
-  try{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put({savedAt:stamp,state},'state');tx.oncomplete=()=>{a=true;finish()};tx.onerror=()=>{failed=true;finish()};tx.onabort=()=>{failed=true;finish()}}catch(e){failed=true;a=true;finish()}
-  try{const tx=db.transaction(CHAT_STORE,'readwrite'),s=tx.objectStore(CHAT_STORE);(state.friends||[]).forEach(f=>s.put({id:f.id,savedAt:stamp,chat:Array.isArray(f.chat)?f.chat:[]}));tx.oncomplete=()=>{b=true;finish()};tx.onerror=()=>{failed=true;finish()};tx.onabort=()=>{failed=true;finish()}}catch(e){failed=true;b=true;finish()}
+  if(!db)return resolve(false);
+  // Write the full state and per-friend chats in ONE transaction. This prevents one store
+  // succeeding while the other fails, which could make the next launch restore mismatched data.
+  try{
+    const names=[STORE,CHAT_STORE].filter(name=>db.objectStoreNames.contains(name));
+    if(names.length!==2)return resolve(false);
+    const tx=db.transaction(names,'readwrite');
+    tx.objectStore(STORE).put({savedAt:stamp,state:clone(state)},'state');
+    const chatStore=tx.objectStore(CHAT_STORE);
+    (state.friends||[]).forEach(f=>chatStore.put({id:f.id,savedAt:stamp,chat:clone(Array.isArray(f.chat)?f.chat:[])}));
+    tx.oncomplete=()=>resolve(true);
+    tx.onerror=()=>resolve(false);
+    tx.onabort=()=>resolve(false);
+  }catch(e){resolve(false)}
 })}
 // Save already writes a synchronous backup during each state change. Avoid creating a newer,
 // timestamp-only backup on pagehide/visibilitychange that could outrank the chat snapshot.
